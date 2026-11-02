@@ -314,6 +314,11 @@ export function parentSet(id: string) {
 }
 
 const cardCache = new Map<string, Promise<any | null>>();
+const parentCache = new Map<string, Promise<any | null>>();
+const parentSetInfo = (id: string) => {
+  if (!parentCache.has(id)) parentCache.set(id, getJson('/sets/' + encodeURIComponent(id)).catch(() => null));
+  return parentCache.get(id)!;
+};
 
 // Raw card JSON in the given language, or null if it doesn't exist.
 export function fetchCardRaw(id: string, lang: 'de' | 'en' = 'de'): Promise<any | null> {
@@ -339,7 +344,7 @@ export async function getCard(id: string): Promise<{ card: Card; setId: string; 
   const setId = parentSet(raw.set?.id ?? id.replace(/-[^-]+$/, ''));
   let setName = raw.set?.name ?? '';
   if (setId !== raw.set?.id) {
-    const parent = await getJson('/sets/' + encodeURIComponent(setId)).catch(() => null);
+    const parent = await parentSetInfo(setId);
     if (parent?.name) setName = parent.name;
     if (MERGED[raw.set.id]) card.localId = MERGED[raw.set.id][1] + card.localId;
   }
