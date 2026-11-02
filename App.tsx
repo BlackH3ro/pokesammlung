@@ -57,7 +57,9 @@ function Main() {
 
   // Once every 12 h: fresh Cardmarket prices for owned and wanted cards (feeds value history + price alarms).
   useEffect(() => {
-    if (!col.ready || refreshing.current || !refreshDue(col.wantsCheckedAt)) return;
+    // Also refresh once when stored card data predates the 30-day averages.
+    const stale = Object.values(col.meta).some((m) => m.variants.some((v) => v.avg30 === undefined));
+    if (!col.ready || refreshing.current || (!refreshDue(col.wantsCheckedAt) && !stale)) return;
     refreshing.current = true;
     const ownedIds = [...new Set(Object.keys(col.owned).map((k) => k.split('|')[0]))];
     refreshPrices(ownedIds, col.meta, col.wants)

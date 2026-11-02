@@ -3,7 +3,7 @@ import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View }
 import { Card, cardImages } from './api';
 import { slotKey, useCollection } from './collection';
 import GradingSheet from './GradingSheet';
-import { eur, FallbackImage } from './ui';
+import { eur, FallbackImage, Trend } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
 
 type Props = { card: Card | null; set: { id: string; name: string }; onClose: () => void };
@@ -44,7 +44,11 @@ export default function CardSheet({ card, set, onClose }: Props) {
                 <View key={v.key} style={[styles.vRow, i > 0 && styles.sep]}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.vLabel}>{v.label}</Text>
-                    <Text style={styles.vPrice}>{v.price != null ? `${eur(v.price)} Trend` : 'kein Preis'}</Text>
+                    <Text style={styles.vPrice}>
+                      {v.price != null ? `${eur(v.price)} Trend` : 'kein Preis'}
+                      {v.avg30 != null ? ` · Ø 30 Tage ${eur(v.avg30)}  ` : ''}
+                      <Trend price={v.price} avg30={v.avg30} />
+                    </Text>
                   </View>
                   <Pressable
                     style={styles.heart}

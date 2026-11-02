@@ -3,8 +3,9 @@ import { ActivityIndicator, FlatList, Linking, Modal, Pressable, ScrollView, Sty
 import { cardImages, SetBrief } from './api';
 import { isAlarm, useCollection, Want } from './collection';
 import { refreshPrices } from './refresh';
+import { shareText, stamp } from './backup';
 import { Palette, useColors, useThemedStyles } from './theme';
-import { Chip, eur, FallbackImage, naturalCompare } from './ui';
+import { Chip, eur, FallbackImage, naturalCompare, Trend } from './ui';
 
 type Sort = 'alarm' | 'priceDesc' | 'priceAsc' | 'set';
 
@@ -55,6 +56,15 @@ export default function WantsScreen({ onOpenSet }: { onOpenSet: (s: SetBrief) =>
 
   const current = open ? col.wants[open] : null;
 
+  const shareList = () => {
+    const rows = list.map((w) => {
+      const label = w.card.variants.find((v) => v.key === w.vKey)?.label ?? w.vKey;
+      return `${w.card.name} (${w.card.setName} ${w.card.localId}, ${label})${w.price != null ? ` – ${eur(w.price)}` : ''}`;
+    });
+    const text = [`Meine Wunschliste – ${wants.length} Karten, ca. ${eur(total)}`, '', ...rows].join('\n');
+    shareText(`wunschliste-${stamp()}.txt`, text, 'text/plain').catch(() => {});
+  };
+
   const header = (
     <View>
       <Text style={styles.title}>Wunschliste</Text>
@@ -70,6 +80,11 @@ export default function WantsScreen({ onOpenSet }: { onOpenSet: (s: SetBrief) =>
       </View>
       <View style={styles.checkRow}>
         <Text style={styles.meta}>Preise geprüft: {ago(col.wantsCheckedAt)}</Text>
+        {wants.length > 0 && (
+          <Pressable onPress={shareList} hitSlop={8}>
+            <Text style={styles.link}>Teilen</Text>
+          </Pressable>
+        )}
         <Pressable onPress={check} disabled={checking || !wants.length} hitSlop={8}>
           {checking ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.link}>Jetzt prüfen ↻</Text>}
         </Pressable>
@@ -113,7 +128,10 @@ export default function WantsScreen({ onOpenSet }: { onOpenSet: (s: SetBrief) =>
                   {item.target != null ? `${hit ? 'Preisalarm! ' : ''}Wunschpreis ${eur(item.target)}` : 'kein Wunschpreis'}
                 </Text>
               </View>
-              <Text style={[styles.value, hit && { color: colors.good }]}>{eur(item.price)}</Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[styles.value, hit && { color: colors.good }]}>{eur(item.price)}</Text>
+                <Trend price={item.price} avg30={item.card.variants.find((v) => v.key === item.vKey)?.avg30} />
+              </View>
             </Pressable>
           );
         }}

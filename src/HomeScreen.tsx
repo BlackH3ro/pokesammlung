@@ -83,7 +83,9 @@ export default function HomeScreen({ onOpenSet }: Props) {
 
   const mineStats = mine
     .map((s) => ({ set: s, stats: setStats(s, col, col.mode[s.id] ?? 'master') }))
-    .filter((m) => m.stats.have > 0 || m.stats.ownedValue > 0);
+    .filter((m) => m.stats.have > 0 || m.stats.ownedValue > 0)
+    // Closest to complete first.
+    .sort((a, b) => b.stats.have / (b.stats.need || 1) - a.stats.have / (a.stats.need || 1));
   const totalValue = mineStats.reduce((sum, m) => sum + m.stats.ownedValue, 0);
 
   const sections = useMemo(() => {
@@ -110,7 +112,7 @@ export default function HomeScreen({ onOpenSet }: Props) {
           <View style={{ flex: 1 }}>
             <Text style={styles.setName}>{set.name}</Text>
             <Text style={styles.meta}>
-              {stats.have} / {stats.need} · {(col.mode[set.id] ?? 'master') === 'master' ? 'Masterset' : 'Grundset'} · fehlt{' '}
+              {Math.floor((stats.have / (stats.need || 1)) * 100)} % · {stats.have} / {stats.need} · {(col.mode[set.id] ?? 'master') === 'master' ? 'Masterset' : 'Grundset'} · fehlt{' '}
               {eur(stats.missingValue)}
             </Text>
             <View style={{ marginTop: 6 }}>

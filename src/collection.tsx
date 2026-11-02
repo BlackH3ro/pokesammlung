@@ -37,6 +37,7 @@ export type Want = {
 
 type State = {
   owned: Record<string, number>; // "cardId|variantKey" -> count
+  addedAt: Record<string, number>; // "cardId|variantKey" -> first time it was added
   excluded: Record<string, true>; // cardId -> not counted (e.g. ultra-rare promos)
   mode: Record<string, Mode>; // setId -> tracking mode
   started: Record<string, string>; // setId -> set name, for "Meine Sets"
@@ -49,7 +50,7 @@ type State = {
 
 export type ValuePoint = { d: string; cards: number; slabs: number };
 
-const EMPTY: State = { owned: {}, excluded: {}, mode: {}, started: {}, meta: {}, slabs: [], wants: {}, wantsCheckedAt: 0, history: [] };
+const EMPTY: State = { addedAt: {}, owned: {}, excluded: {}, mode: {}, started: {}, meta: {}, slabs: [], wants: {}, wantsCheckedAt: 0, history: [] };
 const KEY = 'collection:v1';
 
 export const slotKey = (cardId: string, variantKey: string) => `${cardId}|${variantKey}`;
@@ -101,8 +102,14 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       const k = slotKey(card.id, v);
       const n = Math.max(0, next(s.owned[k] ?? 0));
       const owned = { ...s.owned };
-      if (n > 0) owned[k] = n;
-      else delete owned[k];
+      const addedAt = { ...s.addedAt };
+      if (n > 0) {
+        if (!owned[k]) addedAt[k] = Date.now();
+        owned[k] = n;
+      } else {
+        delete owned[k];
+        delete addedAt[k];
+      }
       let wants = s.wants;
       if (n > 0 && wants[k]) {
         wants = { ...wants };
@@ -111,6 +118,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       return {
         ...s,
         owned,
+        addedAt,
         wants,
         started: { ...s.started, [set.id]: set.name },
         meta: { ...s.meta, [card.id]: { ...card, setId: set.id, setName: set.name } },
@@ -225,6 +233,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       for (const h of incoming.history) if (!byDay.has(h.d)) byDay.set(h.d, h);
       return {
         owned,
+        addedAt: { ...incoming.addedAt, ...s.addedAt },
         excluded: { ...incoming.excluded, ...s.excluded },
         mode: { ...incoming.mode, ...s.mode },
         started: { ...incoming.started, ...s.started },

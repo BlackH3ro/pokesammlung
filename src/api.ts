@@ -27,6 +27,7 @@ export type Variant = {
   key: string;
   label: string;
   price: number | null;
+  avg30?: number | null; // 30-day average, for trend arrows
 };
 
 export type Card = {
@@ -69,7 +70,7 @@ async function cached<T>(key: string, maxAge: number, load: () => Promise<T>, fo
 
 export async function readCachedSet(id: string): Promise<SetDetail | null> {
   try {
-    const raw = await AsyncStorage.getItem('setv3:' + id);
+    const raw = await AsyncStorage.getItem('setv4:' + id);
     return raw ? (JSON.parse(raw).data as SetDetail) : null;
   } catch {
     return null;
@@ -126,6 +127,12 @@ export function loadSeries(force = false): Promise<Series[]> {
   }, force);
 }
 
+function pickAvg30(type: string, cm: any): number | null {
+  if (!cm) return null;
+  const v = /reverse/i.test(type) ? cm['avg30-holo'] : cm.avg30;
+  return typeof v === 'number' && v > 0 ? v : null;
+}
+
 function pickPrice(type: string, cm: any): number | null {
   if (!cm) return null;
   const v = /reverse/i.test(type)
@@ -167,11 +174,12 @@ function toCard(c: any): Card {
         key,
         label: label(v.type) + (extra ? ` (${extra})` : ''),
         price: pickPrice(v.type, v.pricing?.cardmarket ?? fallback),
+        avg30: pickAvg30(v.type, v.pricing?.cardmarket ?? fallback),
       });
     }
   } else if (c.variants) {
     for (const type of ['normal', 'holo', 'reverse', 'firstEdition']) {
-      if (c.variants[type]) variants.push({ key: type.toLowerCase(), label: label(type), price: pickPrice(type, fallback) });
+      if (c.variants[type]) variants.push({ key: type.toLowerCase(), label: label(type), price: pickPrice(type, fallback), avg30: pickAvg30(type, fallback) });
     }
   }
   if (!variants.length) variants = [{ key: 'normal', label: 'Normal', price: pickPrice('normal', fallback) }];
@@ -189,7 +197,7 @@ function toCard(c: any): Card {
 }
 
 export function loadSet(id: string, force = false, onProgress?: (done: number, total: number) => void): Promise<SetDetail> {
-  return cached('setv3:' + id, DAY, async () => {
+  return cached('setv4:' + id, DAY, async () => {
     const s = await getJson('/sets/' + encodeURIComponent(id));
     const children = Object.keys(MERGED).filter((c) => MERGED[c][0] === id);
     const extra = await Promise.all(children.map((c) => getJson('/sets/' + encodeURIComponent(c))));

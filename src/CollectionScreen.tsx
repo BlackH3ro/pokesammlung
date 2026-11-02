@@ -2,15 +2,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { cardImages, readCachedSet, SetBrief } from './api';
 import { cardOwnedAny, CardMeta, useCollection } from './collection';
-import { Chip, eur, FallbackImage, naturalCompare } from './ui';
+import { Chip, eur, FallbackImage, naturalCompare, Trend, trendPct } from './ui';
 import { rarityInfo } from './rarity';
 import ValueChart from './ValueChart';
+import CardSheet from './CardSheet';
 import { shareText, stamp, toCsv } from './backup';
 import { Palette, useColors, useThemedStyles } from './theme';
 
-type Sort = 'value' | 'rarity' | 'name' | 'set';
+type Sort = 'value' | 'recent' | 'rarity' | 'name' | 'set';
 
-type Entry = { key: string; card: CardMeta; variantLabel: string; price: number | null; count: number; rank: number; rarity: string };
+type Entry = {
+  key: string;
+  card: CardMeta;
+  variantLabel: string;
+  price: number | null;
+  avg30: number | null;
+  addedAt: number;
+  count: number;
+  rank: number;
+  rarity: string;
+};
 
 export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrief) => void }) {
   const colors = useColors();
@@ -20,6 +31,7 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
   const [sort, setSort] = useState<Sort>('value');
   const [doubles, setDoubles] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [openCard, setOpenCard] = useState<CardMeta | null>(null);
 
   // Cards ticked before the app remembered card details: fill them in from cached sets.
   useEffect(() => {
@@ -41,10 +53,10 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
       const v = card.variants.find((x) => x.key === vKey);
       // Classic Collection reprints carry no rarity in the data.
       const r = rarityInfo(card.rarity || (card.id.startsWith('30th-c-') ? 'Classic Collection' : ''));
-      out.push({ key, card, variantLabel: v?.label ?? vKey, price: v?.price ?? null, count, rank: r.rank, rarity: r.short });
+      out.push({ key, card, variantLabel: v?.label ?? vKey, price: v?.price ?? null, avg30: v?.avg30 ?? null, addedAt: col.addedAt[key] ?? 0, count, rank: r.rank, rarity: r.short });
     }
     return out;
-  }, [col.owned, col.meta]);
+  }, [col.owned, col.meta, col.addedAt]);
 
   const totalValue = entries.reduce((s, e) => s + (e.price ?? 0) * e.count, 0);
   const totalCards = entries.reduce((s, e) => s + e.count, 0);
@@ -57,6 +69,7 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
     if (doubles) filtered = filtered.filter((e) => e.count > 1);
     const cmp: Record<Sort, (a: Entry, b: Entry) => number> = {
       value: (a, b) => (b.price ?? 0) * b.count - (a.price ?? 0) * a.count,
+      recent: (a, b) => b.addedAt - a.addedAt,
       rarity: (a, b) => b.rank - a.rank || (b.price ?? 0) - (a.price ?? 0),
       name: (a, b) => naturalCompare(a.card.name, b.card.name),
       set: (a, b) => naturalCompare(a.card.setName, b.card.setName) || naturalCompare(a.card.localId, b.card.localId),
@@ -127,6 +140,7 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
       />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 10 }}>
         <Chip label="Wert ↓" active={sort === 'value'} onPress={() => setSort('value')} />
+        <Chip label="Neueste" active={sort === 'recent'} onPress={() => setSort('recent')} />
         <Chip label="Seltenheit" active={sort === 'rarity'} onPress={() => setSort('rarity')} />
         <Chip label="Name" active={sort === 'name'} onPress={() => setSort('name')} />
         <Chip label="Set" active={sort === 'set'} onPress={() => setSort('set')} />
@@ -155,6 +169,7 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
   );
 
   return (
+    <>
     <FlatList
       style={{ backgroundColor: colors.bg }}
       contentContainerStyle={{ padding: 16, paddingBottom: 32, maxWidth: 800, width: '100%', alignSelf: 'center' }}
@@ -171,7 +186,8 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
         return (
           <Pressable
             style={styles.row}
-            onPress={() => onOpenSet({ id: item.card.setId, name: item.card.setName, official: 0, total: 0 })}
+            onPress={() => setOpenCard(item.card)}
+            onLongPress={() => onOpenSet({ id: item.card.setId, name: item.card.setName, official: 0, total: 0 })}
           >
             <FallbackImage key={item.key} uris={cardImages(item.card)} style={styles.thumb} fallback={<View style={styles.thumb} />} />
             <View style={{ flex: 1 }}>
@@ -196,12 +212,17 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={styles.value}>{eur(item.price != null ? item.price * item.count : null)}</Text>
+              <Trend price={item.price} avg30={item.avg30} />
               {item.count > 1 && item.price != null && <Text style={styles.meta}>je {eur(item.price)}</Text>}
             </View>
           </Pressable>
         );
       }}
     />
+    {openCard && (
+      <CardSheet card={openCard} set={{ id: openCard.setId, name: openCard.setName }} onClose={() => setOpenCard(null)} />
+    )}
+    </>
   );
 }
 
@@ -225,6 +246,15 @@ function Stats({ entries }: { entries: Entry[] }) {
   const max = sets[0]?.value || 1;
   const rarities = [...byRarity.entries()].sort((a, b) => b[1].rank - a[1].rank);
   const top = entries.slice().sort((a, b) => (b.price ?? 0) - (a.price ?? 0)).slice(0, 5);
+  // Only cards worth at least 1 € – tiny prices swing wildly in percent.
+  const moving = entries
+    .filter((e) => (e.price ?? 0) >= 1)
+    .map((e) => ({ e, pct: trendPct(e.price, e.avg30) ?? 0 }))
+    .filter((m) => m.pct !== 0);
+  const movers = {
+    up: moving.filter((m) => m.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, 3).map((m) => m.e),
+    down: moving.filter((m) => m.pct < 0).sort((a, b) => a.pct - b.pct).slice(0, 3).map((m) => m.e),
+  };
   const cards = entries.reduce((s, e) => s + e.count, 0);
   const avg = cards ? entries.reduce((s, e) => s + (e.price ?? 0) * e.count, 0) / cards : 0;
 
@@ -251,6 +281,24 @@ function Stats({ entries }: { entries: Entry[] }) {
             {e.card.name} · {e.card.setName}
           </Text>
           <Text style={styles.statsValue}>{eur(e.price)}</Text>
+        </View>
+      ))}
+      {movers.up.length > 0 && <Text style={styles.statsH}>Gewinner (vs. 30-Tage-Schnitt)</Text>}
+      {movers.up.map((e) => (
+        <View key={e.key} style={styles.statsRow}>
+          <Text style={styles.statsLabel} numberOfLines={1}>
+            {e.card.name} · {eur(e.price)}
+          </Text>
+          <Trend price={e.price} avg30={e.avg30} size={13} />
+        </View>
+      ))}
+      {movers.down.length > 0 && <Text style={styles.statsH}>Verlierer</Text>}
+      {movers.down.map((e) => (
+        <View key={e.key} style={styles.statsRow}>
+          <Text style={styles.statsLabel} numberOfLines={1}>
+            {e.card.name} · {eur(e.price)}
+          </Text>
+          <Trend price={e.price} avg30={e.avg30} size={13} />
         </View>
       ))}
       {rarities.length > 0 && <Text style={styles.statsH}>Seltenheiten</Text>}

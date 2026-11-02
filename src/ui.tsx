@@ -49,3 +49,22 @@ const makeStyles = (colors: Palette) =>
   chipText: { fontSize: 13, color: colors.text, fontWeight: '500' },
   chipTextActive: { color: colors.onStrong },
 });
+
+// Price change vs. the 30-day average in percent, or null if unknown / too small to matter.
+export function trendPct(price?: number | null, avg30?: number | null) {
+  if (price == null || avg30 == null || avg30 <= 0) return null;
+  const pct = ((price - avg30) / avg30) * 100;
+  return Math.abs(pct) < 3 ? 0 : pct;
+}
+
+export function Trend({ price, avg30, size = 11 }: { price?: number | null; avg30?: number | null; size?: number }) {
+  const colors = useColors();
+  const pct = trendPct(price, avg30);
+  if (pct == null || pct === 0) return null;
+  const up = pct > 0;
+  return (
+    <Text style={{ fontSize: size, fontWeight: '700', color: up ? colors.good : colors.accent }}>
+      {up ? '▲' : '▼'} {Math.abs(pct).toFixed(0)} %
+    </Text>
+  );
+}
