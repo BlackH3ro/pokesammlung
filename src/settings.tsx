@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Palette, ThemeMode, useColors, useThemedStyles } from './theme';
+import { exportBackup, pickBackup } from './backup';
+import { BackupData, useCollection } from './collection';
 import { Chip } from './ui';
 
 
@@ -51,6 +53,32 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
   const styles = useThemedStyles(makeStyles);
   const { settings, save } = useSettings();
   const [draft, setDraft] = useState(settings);
+  const col = useCollection();
+  const [pending, setPending] = useState<BackupData | null>(null);
+  const [backupMsg, setBackupMsg] = useState('');
+
+  const doExport = async () => {
+    try {
+      await exportBackup(col.snapshot());
+      setBackupMsg('Sicherung erstellt.');
+    } catch (e: any) {
+      setBackupMsg('Fehler: ' + (e?.message ?? e));
+    }
+  };
+  const doPick = async () => {
+    try {
+      const data = await pickBackup();
+      if (data) setPending(data);
+    } catch (e: any) {
+      setBackupMsg('Fehler: ' + (e?.message ?? e));
+    }
+  };
+  const apply = (merge: boolean) => {
+    if (!pending) return;
+    col.restore(pending, merge);
+    setBackupMsg(merge ? 'Sicherung zusammengeführt.' : 'Sicherung wiederhergestellt.');
+    setPending(null);
+  };
 
   const field = (label: string, key: keyof Settings, secret = false) => (
     <View style={{ marginBottom: 12 }}>
@@ -83,6 +111,40 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
+          <Text style={styles.h}>Sicherung</Text>
+          <Text style={styles.p}>
+            Deine Sammlung liegt nur auf diesem Gerät. Speichere regelmäßig eine Sicherung (z. B. in „Dateien“ oder iCloud) – damit
+            kannst du sie auch auf ein anderes Gerät übertragen.
+          </Text>
+          <View style={styles.btnRow}>
+            <Pressable style={styles.btn} onPress={doExport}>
+              <Text style={styles.btnText}>Sicherung exportieren</Text>
+            </Pressable>
+            <Pressable style={[styles.btn, styles.btnLight]} onPress={doPick}>
+              <Text style={[styles.btnText, { color: colors.text }]}>Sicherung laden</Text>
+            </Pressable>
+          </View>
+          {pending && (
+            <View style={styles.pending}>
+              <Text style={styles.label}>
+                Sicherung vom {new Date(pending.exportedAt).toLocaleDateString('de-DE')}: {Object.keys(pending.owned).length} Einträge,{' '}
+                {pending.slabs.length} Slabs, {Object.keys(pending.wants).length} Wünsche
+              </Text>
+              <View style={styles.btnRow}>
+                <Pressable style={styles.btn} onPress={() => apply(true)}>
+                  <Text style={styles.btnText}>Zusammenführen</Text>
+                </Pressable>
+                <Pressable style={[styles.btn, { backgroundColor: colors.text }]} onPress={() => apply(false)}>
+                  <Text style={[styles.btnText, { color: colors.bg }]}>Alles ersetzen</Text>
+                </Pressable>
+              </View>
+              <Pressable onPress={() => setPending(null)}>
+                <Text style={styles.link}>Abbrechen</Text>
+              </Pressable>
+            </View>
+          )}
+          {!!backupMsg && <Text style={styles.p}>{backupMsg}</Text>}
+
           <Text style={styles.h}>Darstellung</Text>
           <View style={{ flexDirection: 'row', marginBottom: 8 }}>
             {(
@@ -124,6 +186,11 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
+  btnRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  btn: { flex: 1, backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  btnLight: { backgroundColor: colors.chip },
+  btnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  pending: { backgroundColor: colors.card, borderRadius: 10, padding: 12, marginBottom: 8, gap: 8 },
   wrap: { flex: 1, backgroundColor: colors.bg },
   top: {
     flexDirection: 'row',

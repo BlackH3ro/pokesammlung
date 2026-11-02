@@ -71,7 +71,11 @@ type Ctx = State & {
   removeWant: (key: string) => void;
   applyWantPrices: (prices: Record<string, number | null>) => void;
   recordValue: (cards: number, slabs: number) => void;
+  snapshot: () => BackupData;
+  restore: (data: BackupData, merge: boolean) => void;
 };
+
+export type BackupData = State & { app: 'pokesammlung'; version: 1; exportedAt: string };
 
 const CollectionContext = createContext<Ctx | null>(null);
 
@@ -204,6 +208,35 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const snapshot = useCallback(
+    (): BackupData => ({ ...state, app: 'pokesammlung', version: 1, exportedAt: new Date().toISOString() }),
+    [state],
+  );
+
+  // Replace everything, or merge: counts take the higher value, lists are combined.
+  const restore = useCallback((data: BackupData, merge: boolean) => {
+    const incoming: State = { ...EMPTY, ...data };
+    setState((s) => {
+      if (!merge) return incoming;
+      const owned = { ...s.owned };
+      for (const [k, n] of Object.entries(incoming.owned)) owned[k] = Math.max(owned[k] ?? 0, n);
+      const slabIds = new Set(s.slabs.map((x) => x.id));
+      const byDay = new Map(s.history.map((h) => [h.d, h]));
+      for (const h of incoming.history) if (!byDay.has(h.d)) byDay.set(h.d, h);
+      return {
+        owned,
+        excluded: { ...incoming.excluded, ...s.excluded },
+        mode: { ...incoming.mode, ...s.mode },
+        started: { ...incoming.started, ...s.started },
+        meta: { ...incoming.meta, ...s.meta },
+        slabs: [...s.slabs, ...incoming.slabs.filter((x) => !slabIds.has(x.id))],
+        wants: { ...incoming.wants, ...s.wants },
+        wantsCheckedAt: Math.max(s.wantsCheckedAt, incoming.wantsCheckedAt),
+        history: [...byDay.values()].sort((a, b) => a.d.localeCompare(b.d)),
+      };
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       ...state,
@@ -221,8 +254,10 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       removeWant,
       applyWantPrices,
       recordValue,
+      snapshot,
+      restore,
     }),
-    [state, ready, count, setCount, addOne, remember, toggleExcluded, setMode, saveSlab, removeSlab, setWant, setWants, removeWant, applyWantPrices, recordValue],
+    [state, ready, count, setCount, addOne, remember, toggleExcluded, setMode, saveSlab, removeSlab, setWant, setWants, removeWant, applyWantPrices, recordValue, snapshot, restore],
   );
   return <CollectionContext.Provider value={value}>{children}</CollectionContext.Provider>;
 }

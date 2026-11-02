@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { Card, cardImages, loadSet, SetBrief, SetDetail } from './api';
+import { shareText, stamp, toCsv } from './backup';
 import CardSheet from './CardSheet';
 import { cardComplete, cardOwnedAny, Mode, setStats, slotKey, useCollection } from './collection';
 import { Chip, eur, FallbackImage, naturalCompare, Progress } from './ui';
@@ -105,6 +106,29 @@ export default function SetScreen({ brief }: { brief: SetBrief }) {
         return [{ card: c, variantKey: cheapest.key }];
       })
     : [];
+  // Shopping list of what's missing, sorted by number – as readable text or as a CSV for Excel.
+  const shareMissing = (kind: 'text' | 'csv') => {
+    const rows = missingSlots
+      .map(({ card, variantKey }) => {
+        const v = card.variants.find((x) => x.key === variantKey)!;
+        return { card, v };
+      })
+      .sort((a, b) => naturalCompare(a.card.localId, b.card.localId));
+    const total = rows.reduce((sum, r) => sum + (r.v.price ?? 0), 0);
+    const safe = set.name.replace(/[^\w\d-]+/g, '_');
+    if (kind === 'csv') {
+      const csv = toCsv([
+        ['Nr.', 'Name', 'Variante', 'Seltenheit', 'Cardmarket-Trend (EUR)'],
+        ...rows.map((r) => [r.card.localId, r.card.name, r.v.label, r.card.rarity, r.v.price != null ? r.v.price.toFixed(2).replace('.', ',') : '']),
+      ]);
+      return shareText(`fehlliste-${safe}-${stamp()}.csv`, csv, 'text/csv').catch(() => {});
+    }
+    const lines = rows.map((r) => `${r.card.localId} ${r.card.name} – ${r.v.label}${r.v.price != null ? ` (${eur(r.v.price)})` : ''}`);
+    const head = `Fehlliste ${set.name} (${mode === 'master' ? 'Masterset' : 'Grundset'})`;
+    const text = [head, `${rows.length} Karten, ca. ${eur(total)}`, '', ...lines].join('\n');
+    return shareText(`fehlliste-${safe}-${stamp()}.txt`, text, 'text/plain').catch(() => {});
+  };
+
   const wantedCount = missingSlots.filter((m) => col.wants[slotKey(m.card.id, m.variantKey)]).length;
 
   const header = (
@@ -165,6 +189,16 @@ export default function SetScreen({ brief }: { brief: SetBrief }) {
               : `♡ ${missingSlots.length - wantedCount} fehlende auf die Wunschliste`}
           </Text>
         </Pressable>
+      )}
+      {missingSlots.length > 0 && (
+        <View style={styles.shareRow}>
+          <Pressable style={[styles.wantAll, { flex: 1 }]} onPress={() => shareMissing('text')}>
+            <Text style={styles.wantAllText}>Fehlliste teilen</Text>
+          </Pressable>
+          <Pressable style={[styles.wantAll, { flex: 1 }]} onPress={() => shareMissing('csv')}>
+            <Text style={styles.wantAllText}>Fehlliste als CSV</Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );
@@ -310,6 +344,7 @@ const makeStyles = (colors: Palette) =>
     borderColor: colors.line,
     marginBottom: 8,
   },
+  shareRow: { flexDirection: 'row', gap: 8 },
   wantAll: { backgroundColor: colors.chip, borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginBottom: 8 },
   wantAllText: { color: colors.text, fontWeight: '600', fontSize: 14 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: 24 },
