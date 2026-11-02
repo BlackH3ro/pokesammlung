@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Card, CardHit, getCard, isMergedChild, loadSeries, readCachedSet, searchCards, Series, SetBrief, SetDetail } from './api';
+import { Card, CardHit, getCard, isMergedChild, loadSeries, loadSet, searchCards, Series, SetBrief, SetDetail } from './api';
 import CardSheet from './CardSheet';
-import { cardOwnedAny, isAlarm, setStats, useCollection } from './collection';
+import { cardOwnedAny, cardsValue, isAlarm, setStats, useCollection } from './collection';
 import { eur, FallbackImage, Progress, toEnglish } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
 
@@ -78,7 +78,7 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
   // Re-read cached details of started sets whenever the collection changes.
   const startedIds = Object.keys(col.started).join(',');
   useEffect(() => {
-    Promise.all(Object.keys(col.started).filter((id) => !isMergedChild(id)).map(readCachedSet)).then((list) =>
+    Promise.all(Object.keys(col.started).filter((id) => !isMergedChild(id)).map((id) => loadSet(id).catch(() => null))).then((list) =>
       setMine(list.filter((s): s is SetDetail => !!s)),
     );
   }, [startedIds, col.owned]);
@@ -90,7 +90,8 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
     .filter((m) => m.stats.have > 0 || m.stats.ownedValue > 0)
     // Closest to complete first.
     .sort((a, b) => b.stats.have / (b.stats.need || 1) - a.stats.have / (a.stats.need || 1));
-  const totalValue = mineStats.reduce((sum, m) => sum + m.stats.ownedValue, 0);
+  // Same figure as the Sammlung tab, independent of which sets are loaded.
+  const totalValue = cardsValue(col.owned, col.meta);
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
