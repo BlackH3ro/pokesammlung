@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { CardHit, cardImages, getCard, searchCards } from './api';
 import { Slab, useCollection } from './collection';
+import SealedScreen from './SealedScreen';
 import { COMPANIES, ebayUrl, fetchSlabPrice, GRADES, LANGUAGES } from './ebay';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage, toEnglish } from './ui';
@@ -30,6 +31,7 @@ export default function SlabsScreen({ onOpenSettings }: { onOpenSettings: () => 
   const col = useCollection();
   const { settings } = useSettings();
   const [adding, setAdding] = useState(false);
+  const [segment, setSegment] = useState<'slabs' | 'sealed'>('slabs');
   const [open, setOpen] = useState<Slab | null>(null);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -55,9 +57,21 @@ export default function SlabsScreen({ onOpenSettings }: { onOpenSettings: () => 
   const total = col.slabs.reduce((s, x) => s + (x.price?.value ?? 0), 0);
   const current = open ? col.slabs.find((s) => s.id === open.id) ?? null : null;
 
+  const switcher = (
+    <View style={styles.segment}>
+      {(['slabs', 'sealed'] as const).map((id) => (
+        <Pressable key={id} style={[styles.segBtn, segment === id && styles.segActive]} onPress={() => setSegment(id)}>
+          <Text style={[styles.segText, segment === id && styles.segTextActive]}>{id === 'slabs' ? 'Slabs' : 'Sealed'}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  if (segment === 'sealed') return <SealedScreen header={switcher} onOpenSettings={onOpenSettings} />;
+
   const header = (
     <View>
-      <Text style={styles.title}>Slabs</Text>
+      {switcher}
       <View style={styles.summary}>
         <View style={{ flex: 1 }}>
           <Text style={styles.summaryLabel}>Marktwert (eBay-Angebote)</Text>
@@ -374,6 +388,11 @@ function AddSlabForm({ onClose, onSave }: { onClose: () => void; onSave: (s: Sla
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
+  segment: { flexDirection: 'row', backgroundColor: colors.chip, borderRadius: 12, padding: 3, marginBottom: 14 },
+  segBtn: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center' },
+  segActive: { backgroundColor: colors.card },
+  segText: { fontSize: 16, fontWeight: '700', color: colors.muted },
+  segTextActive: { color: colors.text },
   title: { fontSize: 30, fontWeight: '800', color: colors.text, marginBottom: 12 },
   summary: { flexDirection: 'row', backgroundColor: colors.hero, borderRadius: 14, padding: 16, alignItems: 'flex-end' },
   summaryLabel: { color: '#C9CDD5', fontSize: 13 },

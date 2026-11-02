@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { SetBrief } from './src/api';
-import { cardsValue, CollectionProvider, isAlarm, useCollection } from './src/collection';
+import { cardsValue, CollectionProvider, isAlarm, sealedValue, useCollection } from './src/collection';
 import { refreshDue, refreshPrices } from './src/refresh';
 import CollectionScreen from './src/CollectionScreen';
 import HomeScreen from './src/HomeScreen';
@@ -73,7 +73,7 @@ function Main() {
 
   // Today's total value for the history chart.
   const totalCards = cardsValue(col.owned, col.meta);
-  const totalSlabs = col.slabs.reduce((s, x) => s + (x.price?.value ?? 0), 0);
+  const totalSlabs = col.slabs.reduce((s, x) => s + (x.price?.value ?? 0), 0) + col.sealed.reduce((s, x) => s + sealedValue(x), 0);
   useEffect(() => {
     if (col.ready && (totalCards > 0 || totalSlabs > 0)) col.recordValue(totalCards, totalSlabs);
   }, [col.ready, totalCards, totalSlabs]);

@@ -94,6 +94,51 @@ export function ebayUrl(slab: Slab) {
   return 'https://www.ebay.de/sch/i.html?_nkw=' + encodeURIComponent(slabQueries(slab)[0]);
 }
 
+export const SEALED_KINDS = ['Display', 'Elite-Trainer-Box', 'Booster', 'Sleeved Booster', 'Collection Box', 'Tin', 'Blister', 'Bundle', 'Sonstiges'];
+
+// eBay search words per kind (German and English listings).
+const KIND_WORDS: Record<string, string> = {
+  Display: 'display',
+  'Elite-Trainer-Box': 'elite trainer box',
+  Booster: 'booster',
+  'Sleeved Booster': 'sleeved booster',
+  'Collection Box': 'collection box',
+  Tin: 'tin',
+  Blister: 'blister',
+  Bundle: 'booster bundle',
+  Sonstiges: '',
+};
+
+const SEALED_BAD = /\b(leer|empty|code|codes|karte|card|single|einzel|nur|only|ohne|without|opened|geöffnet|offen|proxy|fake|case)\b/i;
+
+export function sealedQuery(item: { name: string; kind: string; language: string }) {
+  const lang = LANGUAGES.find((l) => l.id === item.language)?.keyword ?? '';
+  const kind = KIND_WORDS[item.kind] ?? '';
+  const name = item.name.toLowerCase().includes(kind.split(' ')[0]) ? item.name : `${item.name} ${kind}`;
+  return `pokemon ${name} ${lang}`.replace(/\s+/g, ' ').trim();
+}
+
+export const sealedEbayUrl = (item: { name: string; kind: string; language: string }) =>
+  'https://www.ebay.de/sch/i.html?_nkw=' + encodeURIComponent(sealedQuery(item));
+
+// Median of current fixed-price listings for a sealed product, in EUR.
+export async function fetchSealedPrice(item: { name: string; kind: string; language: string }, settings: Settings): Promise<SlabPrice> {
+  if (!settings.ebayClientId || !settings.ebayClientSecret) throw new Error('Für Preise fehlen die eBay-Schlüssel (Einstellungen)');
+  const tok = await getToken(settings);
+  const q = sealedQuery(item);
+  const words = item.name.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+  for (const market of ['EBAY_DE', 'EBAY_US']) {
+    const items = (await search(q, market, tok)).filter(
+      (i) => i.price && !SEALED_BAD.test(i.title) && words.every((w) => i.title.toLowerCase().includes(w)),
+    );
+    if (items.length >= 2) {
+      const prices = await Promise.all(items.map((i) => toEur(parseFloat(i.price!.value), i.price!.currency)));
+      return { value: Math.round(median(prices) * 100) / 100, n: prices.length, at: Date.now(), query: `${q} (${market})` };
+    }
+  }
+  throw new Error('Keine passenden Angebote gefunden – Namen kürzer fassen oder eigenen Wert eintragen');
+}
+
 export async function fetchSlabPrice(slab: Slab, settings: Settings): Promise<SlabPrice> {
   if (!settings.ebayClientId || !settings.ebayClientSecret) {
     throw new Error('Für Slab-Preise fehlen die eBay-Schlüssel (Einstellungen)');

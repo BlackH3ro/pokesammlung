@@ -9,6 +9,19 @@ export type CardMeta = Card & { setId: string; setName: string };
 
 export type SlabPrice = { value: number; n: number; at: number; query: string };
 
+export type Sealed = {
+  id: string;
+  name: string; // e.g. "30 Jahre Elite-Trainer-Box"
+  kind: string; // Display, ETB, Booster, …
+  language: string;
+  count: number;
+  manualValue?: number | null; // per item, overrides the eBay price
+  price?: SlabPrice; // per item, from eBay listings
+  addedAt: number;
+};
+
+export const sealedValue = (x: Sealed) => (x.manualValue ?? x.price?.value ?? 0) * x.count;
+
 export type Slab = {
   id: string;
   cardId?: string;
@@ -43,6 +56,7 @@ type State = {
   started: Record<string, string>; // setId -> set name, for "Meine Sets"
   meta: Record<string, CardMeta>; // cardId -> card info
   slabs: Slab[];
+  sealed: Sealed[];
   wants: Record<string, Want>;
   wantsCheckedAt: number;
   history: ValuePoint[]; // one entry per day
@@ -50,7 +64,7 @@ type State = {
 
 export type ValuePoint = { d: string; cards: number; slabs: number };
 
-const EMPTY: State = { addedAt: {}, owned: {}, excluded: {}, mode: {}, started: {}, meta: {}, slabs: [], wants: {}, wantsCheckedAt: 0, history: [] };
+const EMPTY: State = { addedAt: {}, owned: {}, excluded: {}, mode: {}, started: {}, meta: {}, slabs: [], sealed: [], wants: {}, wantsCheckedAt: 0, history: [] };
 const KEY = 'collection:v1';
 
 export const slotKey = (cardId: string, variantKey: string) => `${cardId}|${variantKey}`;
@@ -67,6 +81,8 @@ type Ctx = State & {
   setMode: (setId: string, mode: Mode) => void;
   saveSlab: (slab: Slab) => void;
   removeSlab: (id: string) => void;
+  saveSealed: (item: Sealed) => void;
+  removeSealed: (id: string) => void;
   setWant: (set: SetRef, card: Card, variantKey: string, target: number | null) => void;
   setWants: (set: SetRef, items: { card: Card; variantKey: string }[]) => void;
   removeWant: (key: string) => void;
@@ -159,6 +175,17 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const saveSealed = useCallback((item: Sealed) => {
+    setState((s) => {
+      const exists = s.sealed.some((x) => x.id === item.id);
+      return { ...s, sealed: exists ? s.sealed.map((x) => (x.id === item.id ? item : x)) : [item, ...s.sealed] };
+    });
+  }, []);
+
+  const removeSealed = useCallback((id: string) => {
+    setState((s) => ({ ...s, sealed: s.sealed.filter((x) => x.id !== id) }));
+  }, []);
+
   const removeSlab = useCallback((id: string) => {
     setState((s) => ({ ...s, slabs: s.slabs.filter((x) => x.id !== id) }));
   }, []);
@@ -239,6 +266,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         started: { ...incoming.started, ...s.started },
         meta: { ...incoming.meta, ...s.meta },
         slabs: [...s.slabs, ...incoming.slabs.filter((x) => !slabIds.has(x.id))],
+        sealed: [...s.sealed, ...incoming.sealed.filter((x) => !s.sealed.some((y) => y.id === x.id))],
         wants: { ...incoming.wants, ...s.wants },
         wantsCheckedAt: Math.max(s.wantsCheckedAt, incoming.wantsCheckedAt),
         history: [...byDay.values()].sort((a, b) => a.d.localeCompare(b.d)),
@@ -258,6 +286,8 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       setMode,
       saveSlab,
       removeSlab,
+      saveSealed,
+      removeSealed,
       setWant,
       setWants,
       removeWant,
@@ -266,7 +296,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       snapshot,
       restore,
     }),
-    [state, ready, count, setCount, addOne, remember, toggleExcluded, setMode, saveSlab, removeSlab, setWant, setWants, removeWant, applyWantPrices, recordValue, snapshot, restore],
+    [state, ready, count, setCount, addOne, remember, toggleExcluded, setMode, saveSlab, removeSlab, saveSealed, removeSealed, setWant, setWants, removeWant, applyWantPrices, recordValue, snapshot, restore],
   );
   return <CollectionContext.Provider value={value}>{children}</CollectionContext.Provider>;
 }
