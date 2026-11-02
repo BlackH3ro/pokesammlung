@@ -32,8 +32,10 @@ jobs:
 
       - name: Card fingerprints (new cards only)
         continue-on-error: true
-        timeout-minutes: 35
-        run: swift scripts/card-prints.swift modules/text-recognizer/ios/CardPrints 25
+        timeout-minutes: 40
+        run: |
+          swiftc -O scripts/card-prints.swift -o "$RUNNER_TEMP/card-prints"
+          "$RUNNER_TEMP/card-prints" modules/text-recognizer/ios/CardPrints 30
 
       - name: Save card fingerprints
         if: always() && hashFiles('modules/text-recognizer/ios/CardPrints/prints.bin') != ''
