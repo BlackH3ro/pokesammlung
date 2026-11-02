@@ -2,10 +2,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Card, cardImages } from './api';
+import { ActivityIndicator, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Card, cardImages, loadSeries, loadSet, SetBrief, SetDetail } from './api';
 import { useCollection } from './collection';
-import { matchCard, ocr } from './recognize';
+import { matchCard, matchCardInSet, ocr } from './recognize';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
@@ -36,6 +36,12 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   const [auto, setAuto] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pref, setPref] = useState<VariantPref>('normal');
+  const [lockedSet, setLockedSet] = useState<SetDetail | null>(null);
+  const [picking, setPicking] = useState(false);
+  const lockedRef = useRef<SetDetail | null>(null);
+  useEffect(() => {
+    lockedRef.current = lockedSet;
+  }, [lockedSet]);
   const [status, setStatus] = useState('Karte in den Rahmen legen');
   const [scans, setScans] = useState<Scan[]>([]);
   const lastSeen = useRef<string | null>(null);
@@ -58,7 +64,8 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     try {
       setStatus('Lese Karte …');
       const text = await ocr(await capture(), settings.ocrKey);
-      const match = await matchCard(text);
+      const locked = lockedRef.current;
+      const match = locked ? await matchCardInSet(text, locked) : await matchCard(text);
       if (!match) {
         lastSeen.current = null; // gap between cards: the next card may be a duplicate again
         setStatus(text.trim() ? 'Nummer nicht gefunden – Karte gerade halten' : 'Keine Karte erkannt');
@@ -153,6 +160,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         <View style={styles.row}>
           <Chip label="Normal" active={pref === 'normal'} onPress={() => setPref('normal')} />
           <Chip label="Reverse Holo" active={pref === 'reverse'} onPress={() => setPref('reverse')} />
+          <Chip label={lockedSet ? `Set: ${lockedSet.name}` : 'Set: alle'} active={!!lockedSet} onPress={() => setPicking(true)} />
           <View style={{ flex: 1 }} />
           <Text style={styles.session}>
             {scans.length} · {eur(sessionValue)}
@@ -173,6 +181,15 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         )}
       </View>
 
+      <SetPicker
+        visible={picking}
+        current={lockedSet?.id}
+        onClose={() => setPicking(false)}
+        onPick={(set) => {
+          setLockedSet(set);
+          setPicking(false);
+        }}
+      />
       <FlatList
         data={scans}
         keyExtractor={(s) => String(s.id)}
@@ -213,8 +230,107 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   );
 }
 
+
+// Choose a set to scan against, or "all sets". Started sets come first.
+function SetPicker(props: { visible: boolean; current?: string; onClose: () => void; onPick: (s: SetDetail | null) => void }) {
+  const colors = useColors();
+  const styles = useThemedStyles(makeStyles);
+  const col = useCollection();
+  const [all, setAll] = useState<SetBrief[]>([]);
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (props.visible && !all.length) loadSeries().then((series) => setAll(series.flatMap((s) => s.sets))).catch(() => {});
+  }, [props.visible]);
+
+  const mine = all.filter((s) => col.started[s.id]);
+  const needle = q.trim().toLowerCase();
+  const rest = all.filter((s) => !col.started[s.id] && (!needle || s.name.toLowerCase().includes(needle)));
+
+  const choose = async (s: SetBrief) => {
+    setLoading(s.id);
+    try {
+      props.onPick(await loadSet(s.id));
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const row = (s: SetBrief) => (
+    <Pressable key={s.id} style={styles.pickRow} onPress={() => choose(s)}>
+      <Text style={[styles.name, props.current === s.id && { color: colors.accent }]}>{s.name}</Text>
+      {loading === s.id ? <ActivityIndicator color={colors.accent} /> : <Text style={styles.meta}>{s.total} Karten</Text>}
+    </Pressable>
+  );
+
+  return (
+    <Modal visible={props.visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={props.onClose}>
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
+        <View style={styles.pickTop}>
+          <Text style={[styles.name, { flex: 1, fontSize: 17 }]}>Set zum Scannen</Text>
+          <Pressable onPress={props.onClose} hitSlop={10}>
+            <Text style={styles.done}>Fertig</Text>
+          </Pressable>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
+          <Text style={styles.hint}>
+            Liegt ein Stapel aus einem Set im Cardslinger, wähle es hier: Die App sucht dann nur in diesem Set und erkennt Karten auch
+            über den Namen (z. B. Classic-Collection-Reprints).
+          </Text>
+          <Pressable style={styles.pickRow} onPress={() => props.onPick(null)}>
+            <Text style={[styles.name, !props.current && { color: colors.accent }]}>Alle Sets (automatisch)</Text>
+          </Pressable>
+          {mine.length > 0 && <Text style={styles.pickH}>Meine Sets</Text>}
+          {mine.map(row)}
+          <Text style={styles.pickH}>Alle Sets</Text>
+          <TextInput
+            style={styles.pickSearch}
+            placeholder="Set suchen"
+            placeholderTextColor={colors.muted}
+            value={q}
+            onChangeText={setQ}
+            autoCorrect={false}
+          />
+          {rest.slice(0, needle ? 60 : 25).map(row)}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
+  pickTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: colors.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  done: { fontSize: 16, color: colors.accent, fontWeight: '600' },
+  pickH: { fontSize: 13, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', marginTop: 16, marginBottom: 8 },
+  pickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.card,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 6,
+  },
+  pickSearch: {
+    backgroundColor: colors.card,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 15,
+    color: colors.text,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line,
+    marginBottom: 8,
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: colors.bg },
   p: { color: colors.text, marginBottom: 16, textAlign: 'center' },
   camWrap: { height: 340, backgroundColor: '#000', overflow: 'hidden' },
@@ -231,7 +347,7 @@ const makeStyles = (colors: Palette) =>
   statusBar: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 8, backgroundColor: 'rgba(0,0,0,0.55)' },
   statusText: { color: '#fff', fontSize: 13, textAlign: 'center' },
   controls: { padding: 12, gap: 10 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   session: { color: colors.muted, fontSize: 13, fontWeight: '600' },
   bigBtn: { backgroundColor: colors.strong, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center' },
   stopBtn: { backgroundColor: colors.accent },

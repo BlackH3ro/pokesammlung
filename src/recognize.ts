@@ -98,3 +98,50 @@ export async function matchCard(text: string): Promise<Match | null> {
   const res = await getCard(best.id);
   return res ? { card: res.card, setId: res.setId, setName: res.setName, confident } : null;
 }
+
+// ---- Set-locked mode (Cardslinger with a stack from one set) ----
+
+const enNames = new Map<string, Promise<Map<string, string>>>();
+
+// English names of a set's cards (incl. merged sub-sets), so English cards match too.
+function englishNames(setId: string, cardIds: string[]) {
+  if (!enNames.has(setId)) {
+    const subSets = [...new Set(cardIds.map((id) => id.replace(/-[^-]+$/, '')))];
+    enNames.set(
+      setId,
+      Promise.all(
+        subSets.map((s) =>
+          fetch('https://api.tcgdex.net/v2/en/sets/' + encodeURIComponent(s))
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ),
+      ).then((sets) => {
+        const m = new Map<string, string>();
+        for (const s of sets) for (const c of s?.cards ?? []) m.set(c.id, c.name);
+        return m;
+      }),
+    );
+  }
+  return enNames.get(setId)!;
+}
+
+const bareNumber = (lid: string) => lid.replace(/^[A-Za-z]+\s*/, '').replace(/^0+(?=\d)/, '');
+
+// Matches only against one set: by number where it fits, otherwise by name (e.g. Classic Collection
+// reprints, which carry their original number).
+export async function matchCardInSet(text: string, set: { id: string; name: string; cards: Card[] }): Promise<Match | null> {
+  const parsed = parseNumber(text);
+  const en = await englishNames(set.id, set.cards.map((c) => c.id));
+  const scored = set.cards.map((card) => {
+    const name = Math.max(nameScore(text, card.name), nameScore(text, en.get(card.id)));
+    const num = parsed ? bareNumber(card.localId) === bareNumber(parsed.prefix + parsed.number) : false;
+    return { card, score: name * 2 + (num ? 3 : 0), name, num };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score === 0) return null;
+  // Number alone or a partial name is a guess; number + name or a unique full name is solid.
+  const sameName = scored.filter((s) => s.name === 2).length;
+  const confident = (best.num && best.name > 0) || (best.name === 2 && sameName === 1);
+  return { card: best.card, setId: set.id, setName: set.name, confident };
+}

@@ -294,6 +294,11 @@ function CardTile(props: {
             <Text style={styles.checkText}>✓</Text>
           </View>
         )}
+        {card.variants.some((v) => col.wants[slotKey(card.id, v.key)]) && (
+          <View style={styles.wantBadge} pointerEvents="none">
+            <Text style={styles.wantBadgeText}>♥</Text>
+          </View>
+        )}
       </Pressable>
       <Text style={styles.cardName} numberOfLines={1}>
         {card.localId} · {card.name}
@@ -333,6 +338,18 @@ function short(label: string) {
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
+  wantBadge: {
+    position: 'absolute',
+    right: 6,
+    top: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wantBadgeText: { color: colors.accent, fontSize: 14 },
   search: {
     backgroundColor: colors.card,
     borderRadius: 10,
