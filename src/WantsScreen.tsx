@@ -41,7 +41,7 @@ export default function WantsScreen({ onOpenSet }: { onOpenSet: (s: SetBrief) =>
       priceAsc: (a, b) => (a.price ?? 0) - (b.price ?? 0),
       set: (a, b) => naturalCompare(a.card.setName, b.card.setName) || naturalCompare(a.card.localId, b.card.localId),
     };
-    return wants.slice().sort(cmp[sort]);
+    return Object.values(col.wants).sort(cmp[sort]);
   }, [col.wants, sort]);
 
   const check = async () => {

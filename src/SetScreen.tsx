@@ -45,9 +45,9 @@ export default function SetScreen({ brief }: { brief: SetBrief }) {
   const tile = (Math.min(width, 1000) - 16 * 2 - 8 * (columns - 1)) / columns;
 
   const load = (force = false) => {
-    setError(null);
     return loadSet(brief.id, force, (d, t) => setProgress([d, t]))
       .then((s) => {
+        setError(null);
         setSet(s);
         // Keep the "Sammlung" tab's card details (and prices) fresh for cards you own here.
         const owned = s.cards.filter((c) => cardOwnedAny(c, col.owned));
@@ -255,7 +255,6 @@ export default function SetScreen({ brief }: { brief: SetBrief }) {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
-  const colors = useColors();
   const styles = useThemedStyles(makeStyles);
   return (
     <View style={{ flex: 1 }}>

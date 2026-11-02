@@ -64,7 +64,9 @@ export default function GradingSheet({ card, onClose }: { card: Card; onClose: (
   };
 
   useEffect(() => {
-    if (hasKeys) loadPrices();
+    if (!hasKeys) return;
+    const t = setTimeout(loadPrices, 0); // after render; also coalesces quick chip changes
+    return () => clearTimeout(t);
   }, [company, language]);
 
   const costs = (raw ?? 0) + (parseEuro(fee) ?? 0) + (parseEuro(shipping) ?? 0);

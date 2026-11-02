@@ -114,7 +114,7 @@ function Main() {
 
             <View style={{ flex: 1 }}>
               {tab === 'sets' &&
-                (openSet ? <SetScreen key={openSet.id} brief={openSet} /> : <HomeScreen onOpenSet={setOpenSet} />)}
+                (openSet ? <SetScreen key={openSet.id} brief={openSet} /> : <HomeScreen onOpenSet={setOpenSet} onOpenWants={() => setTab('wants')} />)}
               {tab === 'collection' && <CollectionScreen onOpenSet={showSet} />}
               {tab === 'scan' && <ScanScreen onOpenSettings={() => setSettingsOpen(true)} />}
               {tab === 'wants' && <WantsScreen onOpenSet={showSet} />}

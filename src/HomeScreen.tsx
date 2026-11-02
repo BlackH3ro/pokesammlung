@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, CardHit, getCard, isMergedChild, loadSeries, readCachedSet, searchCards, Series, SetBrief, SetDetail } from './api';
 import CardSheet from './CardSheet';
-import { cardOwnedAny, setStats, useCollection } from './collection';
+import { cardOwnedAny, isAlarm, setStats, useCollection } from './collection';
 import { eur, FallbackImage, Progress, toEnglish } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
 
-type Props = { onOpenSet: (set: SetBrief) => void };
+type Props = { onOpenSet: (set: SetBrief) => void; onOpenWants?: () => void };
 
-export default function HomeScreen({ onOpenSet }: Props) {
+export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
   const colors = useColors();
   const styles = useThemedStyles(makeStyles);
   const col = useCollection();
@@ -63,9 +63,11 @@ export default function HomeScreen({ onOpenSet }: Props) {
   };
 
   const load = (force = false) => {
-    setError(null);
     return loadSeries(force)
-      .then(setSeries)
+      .then((list) => {
+        setError(null);
+        setSeries(list);
+      })
       .catch((e) => setError(String(e.message ?? e)));
   };
 
@@ -80,6 +82,8 @@ export default function HomeScreen({ onOpenSet }: Props) {
       setMine(list.filter((s): s is SetDetail => !!s)),
     );
   }, [startedIds, col.owned]);
+
+  const alarms = Object.values(col.wants).filter(isAlarm);
 
   const mineStats = mine
     .map((s) => ({ set: s, stats: setStats(s, col, col.mode[s.id] ?? 'master') }))
@@ -101,6 +105,13 @@ export default function HomeScreen({ onOpenSet }: Props) {
   const header = (
     <View>
       <Text style={styles.title}>Meine Sammlung</Text>
+      {alarms.length > 0 && (
+        <Pressable style={styles.alarm} onPress={onOpenWants}>
+          <Text style={styles.alarmText}>
+            ♥ {alarms.length === 1 ? `${alarms[0].card.name} ist im Wunschpreis` : `${alarms.length} Wunschkarten sind im Wunschpreis`} – ansehen ›
+          </Text>
+        </Pressable>
+      )}
       <View style={styles.summary}>
         <Text style={styles.summaryLabel}>Sammlungswert (Cardmarket-Trend)</Text>
         <Text style={styles.summaryValue}>{eur(totalValue)}</Text>
@@ -234,6 +245,8 @@ export default function HomeScreen({ onOpenSet }: Props) {
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
+  alarm: { backgroundColor: colors.good, borderRadius: 12, padding: 12, marginBottom: 10 },
+  alarmText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   hitHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   hits: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   hit: { width: 104 },
