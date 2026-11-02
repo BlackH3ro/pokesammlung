@@ -70,6 +70,33 @@ export default function CardSheet({ card, set, onClose }: Props) {
             })}
           </View>
 
+          {card.variants.some((v) => v.history || v.avg30 != null) && (
+            <View style={[styles.box, { paddingVertical: 12 }]}>
+              <Text style={styles.vLabel}>Preisentwicklung (Cardmarket)</Text>
+              {card.variants.map((v) => (
+                <View key={v.key} style={{ marginTop: 8 }}>
+                  {card.variants.length > 1 && <Text style={styles.vPrice}>{v.label}</Text>}
+                  <View style={styles.histRow}>
+                    {(
+                      [
+                        ['Ø 30 T', v.avg30],
+                        ['Ø 7 T', v.history?.avg7],
+                        ['Ø 1 T', v.history?.avg1],
+                        ['Trend', v.price],
+                        ['ab', v.history?.low],
+                      ] as [string, number | null | undefined][]
+                    ).map(([label, value]) => (
+                      <View key={label} style={styles.histCell}>
+                        <Text style={styles.histLabel}>{label}</Text>
+                        <Text style={styles.histValue}>{value != null ? eur(value) : '–'}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
           <View style={[styles.box, styles.vRow]}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.vLabel}>Nicht mitzählen</Text>
@@ -102,6 +129,10 @@ export default function CardSheet({ card, set, onClose }: Props) {
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
+  histRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  histCell: { alignItems: 'center', flex: 1 },
+  histLabel: { fontSize: 11, color: colors.muted },
+  histValue: { fontSize: 13, fontWeight: '700', color: colors.text, marginTop: 2 },
   heart: { width: 32, height: 36, alignItems: 'center', justifyContent: 'center', marginRight: 4 },
   heartText: { fontSize: 22, color: colors.muted },
   gradeBtn: { backgroundColor: colors.chip, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16, alignItems: 'center', maxWidth: 520, width: '100%', alignSelf: 'center' },

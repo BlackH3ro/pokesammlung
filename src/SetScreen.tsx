@@ -16,11 +16,12 @@ import {
 import { Card, cardImages, loadSet, SetBrief, SetDetail } from './api';
 import { shareText, stamp, toCsv } from './backup';
 import CardSheet from './CardSheet';
+import { rarityInfo } from './rarity';
 import { cardComplete, cardOwnedAny, Mode, setStats, slotKey, useCollection } from './collection';
 import { Chip, eur, FallbackImage, naturalCompare, Progress } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
 
-type Sort = 'number' | 'priceDesc' | 'priceAsc' | 'name';
+type Sort = 'number' | 'priceDesc' | 'priceAsc' | 'rarity' | 'name';
 type Filter = 'all' | 'missing' | 'owned';
 
 const maxPrice = (c: Card) => Math.max(0, ...c.variants.map((v) => v.price ?? 0));
@@ -73,6 +74,7 @@ export default function SetScreen({ brief }: { brief: SetBrief }) {
       priceDesc: (a, b) => maxPrice(b) - maxPrice(a),
       priceAsc: (a, b) => maxPrice(a) - maxPrice(b),
       name: (a, b) => naturalCompare(a.name, b.name),
+      rarity: (a, b) => rarityInfo(b.rarity).rank - rarityInfo(a.rarity).rank || naturalCompare(a.localId, b.localId),
     };
     return list.sort(cmp[sort]);
   }, [set, sort, filter, q, col.owned, col.excluded, mode]);
@@ -165,6 +167,7 @@ export default function SetScreen({ brief }: { brief: SetBrief }) {
         <Chip label="Nr." active={sort === 'number'} onPress={() => setSort('number')} />
         <Chip label="Preis ↓" active={sort === 'priceDesc'} onPress={() => setSort('priceDesc')} />
         <Chip label="Preis ↑" active={sort === 'priceAsc'} onPress={() => setSort('priceAsc')} />
+        <Chip label="Seltenheit" active={sort === 'rarity'} onPress={() => setSort('rarity')} />
         <Chip label="Name" active={sort === 'name'} onPress={() => setSort('name')} />
       </ScrollView>
       <View style={styles.chips}>

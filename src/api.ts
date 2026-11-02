@@ -28,6 +28,7 @@ export type Variant = {
   label: string;
   price: number | null;
   avg30?: number | null; // 30-day average, for trend arrows
+  history?: { low: number | null; avg1: number | null; avg7: number | null }; // more Cardmarket figures
 };
 
 export type Card = {
@@ -70,7 +71,7 @@ async function cached<T>(key: string, maxAge: number, load: () => Promise<T>, fo
 
 export async function readCachedSet(id: string): Promise<SetDetail | null> {
   try {
-    const raw = await AsyncStorage.getItem('setv4:' + id);
+    const raw = await AsyncStorage.getItem('setv5:' + id);
     return raw ? (JSON.parse(raw).data as SetDetail) : null;
   } catch {
     return null;
@@ -127,6 +128,17 @@ export function loadSeries(force = false): Promise<Series[]> {
   }, force);
 }
 
+function pickHistory(type: string, cm: any) {
+  if (!cm) return undefined;
+  const rev = /reverse/i.test(type);
+  const n = (v: any) => (typeof v === 'number' && v > 0 ? v : null);
+  return {
+    low: n(rev ? cm['low-holo'] : cm.low),
+    avg1: n(rev ? cm['avg1-holo'] : cm.avg1),
+    avg7: n(rev ? cm['avg7-holo'] : cm.avg7),
+  };
+}
+
 function pickAvg30(type: string, cm: any): number | null {
   if (!cm) return null;
   const v = /reverse/i.test(type) ? cm['avg30-holo'] : cm.avg30;
@@ -175,11 +187,12 @@ function toCard(c: any): Card {
         label: label(v.type) + (extra ? ` (${extra})` : ''),
         price: pickPrice(v.type, v.pricing?.cardmarket ?? fallback),
         avg30: pickAvg30(v.type, v.pricing?.cardmarket ?? fallback),
+        history: pickHistory(v.type, v.pricing?.cardmarket ?? fallback),
       });
     }
   } else if (c.variants) {
     for (const type of ['normal', 'holo', 'reverse', 'firstEdition']) {
-      if (c.variants[type]) variants.push({ key: type.toLowerCase(), label: label(type), price: pickPrice(type, fallback), avg30: pickAvg30(type, fallback) });
+      if (c.variants[type]) variants.push({ key: type.toLowerCase(), label: label(type), price: pickPrice(type, fallback), avg30: pickAvg30(type, fallback), history: pickHistory(type, fallback) });
     }
   }
   if (!variants.length) variants = [{ key: 'normal', label: 'Normal', price: pickPrice('normal', fallback) }];
@@ -197,7 +210,7 @@ function toCard(c: any): Card {
 }
 
 export function loadSet(id: string, force = false, onProgress?: (done: number, total: number) => void): Promise<SetDetail> {
-  return cached('setv4:' + id, DAY, async () => {
+  return cached('setv5:' + id, DAY, async () => {
     const s = await getJson('/sets/' + encodeURIComponent(id));
     const children = Object.keys(MERGED).filter((c) => MERGED[c][0] === id);
     const extra = await Promise.all(children.map((c) => getJson('/sets/' + encodeURIComponent(c))));

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { cardImages, readCachedSet, SetBrief } from './api';
 import { cardOwnedAny, CardMeta, useCollection } from './collection';
 import { Chip, eur, FallbackImage, naturalCompare, Trend, trendPct } from './ui';
 import { rarityInfo } from './rarity';
 import ValueChart from './ValueChart';
 import CardSheet from './CardSheet';
+import { refreshPrices } from './refresh';
 import { shareText, stamp, toCsv } from './backup';
 import { Palette, useColors, useThemedStyles } from './theme';
 
@@ -32,6 +33,19 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
   const [doubles, setDoubles] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [openCard, setOpenCard] = useState<CardMeta | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refreshAll = async () => {
+    setRefreshing(true);
+    try {
+      const ownedIds = [...new Set(Object.keys(col.owned).map((k) => k.split('|')[0]))];
+      const { cards, wantPrices } = await refreshPrices(ownedIds, col.meta, col.wants);
+      col.remember(cards);
+      col.applyWantPrices(wantPrices);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Cards ticked before the app remembered card details: fill them in from cached sets.
   useEffect(() => {
@@ -172,6 +186,7 @@ export default function CollectionScreen({ onOpenSet }: { onOpenSet: (s: SetBrie
     <>
     <FlatList
       style={{ backgroundColor: colors.bg }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
       contentContainerStyle={{ padding: 16, paddingBottom: 32, maxWidth: 800, width: '100%', alignSelf: 'center' }}
       data={list}
       keyExtractor={(e) => e.key}
