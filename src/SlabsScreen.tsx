@@ -14,6 +14,7 @@ import {
 import { CardHit, cardImages, getCard, searchCards } from './api';
 import { Slab, useCollection } from './collection';
 import SealedScreen from './SealedScreen';
+import ValueChart from './ValueChart';
 import { COMPANIES, ebayUrl, fetchSlabPrice, GRADES, LANGUAGES } from './ebay';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage, toEnglish } from './ui';
@@ -212,6 +213,17 @@ function SlabSheet(props: {
               <Text style={styles.metaCenter}>Noch kein Preis</Text>
             )}
             {!!props.error && <Text style={styles.error}>{props.error}</Text>}
+          </View>
+          <View style={styles.wide}>
+            <ValueChart
+              points={slab.history ?? []}
+              title="Preisverlauf"
+              emptyText={
+                slab.price
+                  ? 'Die Kurve wächst ab jetzt mit: Der Preis wird jeden Tag automatisch neu geholt.'
+                  : 'Sobald es einen Preis gibt, wird er jeden Tag gespeichert und hier als Kurve gezeigt.'
+              }
+            />
           </View>
           {props.canRefresh && (
             <Pressable style={[styles.btn, styles.wide]} onPress={props.onRefresh}>

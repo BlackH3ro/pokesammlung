@@ -13,14 +13,17 @@ const day = (d: string) => {
   return `${dd}.${m}.`;
 };
 
-// Daily total value (cards + slabs) as an area chart.
-export default function ValueChart({ history }: { history: ValuePoint[] }) {
+type Point = { d: string; v: number };
+
+// Daily total value (cards + slabs) as an area chart – or any other daily series via `points` (slab prices).
+export default function ValueChart(props: { history?: ValuePoint[]; points?: Point[]; title?: string; emptyText?: string }) {
   const colors = useColors();
   const styles = useThemedStyles(makeStyles);
   const [range, setRange] = useState<Range>(30);
   const [width, setWidth] = useState(0);
 
-  const points = (range ? history.slice(-range) : history).map((p) => ({ d: p.d, v: p.cards + p.slabs }));
+  const all: Point[] = props.points ?? (props.history ?? []).map((p) => ({ d: p.d, v: p.cards + p.slabs }));
+  const points = range ? all.slice(-range) : all;
   const first = points[0]?.v ?? 0;
   const last = points[points.length - 1]?.v ?? 0;
   const diff = last - first;
@@ -43,7 +46,7 @@ export default function ValueChart({ history }: { history: ValuePoint[] }) {
   return (
     <View style={styles.box}>
       <View style={styles.head}>
-        <Text style={styles.title}>Wertverlauf</Text>
+        <Text style={styles.title}>{props.title ?? 'Wertverlauf'}</Text>
         <Text style={[styles.change, { color: stroke }]}>
           {points.length >= 2 ? `${up ? '+' : ''}${eur(diff)} (${up ? '+' : ''}${pct.toFixed(1).replace('.', ',')} %)` : ''}
         </Text>
@@ -63,7 +66,8 @@ export default function ValueChart({ history }: { history: ValuePoint[] }) {
         ) : (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              Der Verlauf startet heute ({eur(last)}). Ab morgen siehst du hier die Kurve – die App speichert den Wert jeden Tag.
+              {props.emptyText ??
+                `Der Verlauf startet heute (${eur(last)}). Ab morgen siehst du hier die Kurve – die App speichert den Wert jeden Tag.`}
             </Text>
           </View>
         )}

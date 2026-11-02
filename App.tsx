@@ -4,6 +4,7 @@ import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { SetBrief } from './src/api';
 import { cardsValue, CollectionProvider, isAlarm, sealedValue, useCollection } from './src/collection';
+import { fetchSlabPrice } from './src/ebay';
 import { refreshDue, refreshPrices } from './src/refresh';
 import CollectionScreen from './src/CollectionScreen';
 import HomeScreen from './src/HomeScreen';
@@ -70,6 +71,25 @@ function Main() {
       .catch(() => {})
       .finally(() => (refreshing.current = false));
   }, [col.ready]);
+
+  // Once a day: fresh eBay prices for the slabs (if eBay keys are set), so their price charts fill up.
+  const { settings } = useSettings();
+  const slabRefreshing = useRef(false);
+  useEffect(() => {
+    if (!col.ready || slabRefreshing.current || !settings.ebayClientId || !settings.ebayClientSecret) return;
+    const due = col.slabs.filter((s) => !s.price || Date.now() - s.price.at > 20 * 3600 * 1000);
+    if (!due.length) return;
+    slabRefreshing.current = true;
+    (async () => {
+      for (const slab of due) {
+        try {
+          col.saveSlab({ ...slab, price: await fetchSlabPrice(slab, settings) });
+        } catch {
+          // no listings or no connection – try again next time
+        }
+      }
+    })().finally(() => (slabRefreshing.current = false));
+  }, [col.ready, settings.ebayClientId, settings.ebayClientSecret]);
 
   // Today's total value for the history chart.
   const totalCards = cardsValue(col.owned, col.meta);

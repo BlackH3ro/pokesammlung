@@ -35,6 +35,7 @@ export type Slab = {
   grade: string;
   cert?: string;
   price?: SlabPrice;
+  history?: { d: string; v: number }[]; // one price per day, for the chart
   addedAt: number;
 };
 
@@ -186,9 +187,17 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, mode: { ...s.mode, [setId]: mode } }));
   }, []);
 
-  const saveSlab = useCallback((slab: Slab) => {
+  const saveSlab = useCallback((input: Slab) => {
     setState((s) => {
-      const exists = s.slabs.some((x) => x.id === slab.id);
+      const prev = s.slabs.find((x) => x.id === input.id);
+      // Every fetched price also goes into the slab's daily price history (latest price of the day wins).
+      let history = prev?.history ?? input.history ?? [];
+      if (input.price) {
+        const d = new Date(input.price.at).toISOString().slice(0, 10);
+        history = [...history.filter((h) => h.d !== d), { d, v: input.price.value }].sort((a, b) => a.d.localeCompare(b.d));
+      }
+      const slab = { ...input, history };
+      const exists = !!prev;
       return { ...s, slabs: exists ? s.slabs.map((x) => (x.id === slab.id ? slab : x)) : [slab, ...s.slabs] };
     });
   }, []);
