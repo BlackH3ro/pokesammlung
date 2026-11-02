@@ -1,7 +1,16 @@
+import { requireOptionalNativeModule } from 'expo';
 import { fetchCardRaw, getCard, loadSeries, SetBrief } from './api';
 import type { Card } from './api';
 
 export type Match = { card: Card; setId: string; setName: string; confident: boolean };
+
+// ---- OCR on the device (Apple Vision, see modules/text-recognizer) ----
+
+const native = requireOptionalNativeModule<{ recognize(uri: string): Promise<string> }>('TextRecognizer');
+
+// Missing on the web and in builds without the native module; then the scanner falls back to OCR.space.
+export const hasOnDeviceOcr = !!native;
+export const ocrOnDevice = (uri: string) => native!.recognize(uri);
 
 // ---- OCR (ocr.space, free tier) ----
 
@@ -80,18 +89,20 @@ export async function matchCard(text: string): Promise<Match | null> {
     .filter((s) => (s.printed ?? s.official) === total || (!!parsed.prefix && s.total >= total))
     .slice(0, 40);
 
+  // Ask all candidate sets at once – one after the other took seconds with many sets of the same size.
+  const hits = await Promise.all(
+    candidates.map(async (set) => {
+      for (const lid of localIdCandidates(parsed.prefix, parsed.number)) {
+        const id = `${set.id}-${lid}`;
+        const [de, en] = await Promise.all([fetchCardRaw(id, 'de'), fetchCardRaw(id, 'en')]);
+        if (!de && !en) continue;
+        return { id, score: Math.max(nameScore(text, de?.name), nameScore(text, en?.name)) };
+      }
+      return null;
+    }),
+  );
   let best: { id: string; score: number } | null = null;
-  for (const set of candidates) {
-    for (const lid of localIdCandidates(parsed.prefix, parsed.number)) {
-      const id = `${set.id}-${lid}`;
-      const [de, en] = await Promise.all([fetchCardRaw(id, 'de'), fetchCardRaw(id, 'en')]);
-      if (!de && !en) continue;
-      const score = Math.max(nameScore(text, de?.name), nameScore(text, en?.name));
-      if (!best || score > best.score) best = { id, score };
-      break;
-    }
-    if (best && best.score === 2) break;
-  }
+  for (const hit of hits) if (hit && (!best || hit.score > best.score)) best = hit;
   if (!best) return null;
   // Without a name hit we only trust the number if exactly one set fits.
   const confident = best.score > 0 || candidates.length === 1;

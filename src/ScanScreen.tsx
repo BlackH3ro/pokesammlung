@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, cardImages, loadSeries, loadSet, SetBrief, SetDetail } from './api';
 import { useCollection } from './collection';
-import { matchCard, matchCardInSet, ocr } from './recognize';
+import { hasOnDeviceOcr, matchCard, matchCardInSet, ocr, ocrOnDevice } from './recognize';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
@@ -50,20 +50,21 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     prefRef.current = pref;
   }, [pref]);
 
-  async function capture(): Promise<string> {
-    const photo = await cam.current!.takePictureAsync({ quality: 0.7, shutterSound: false });
+  // Photo → text. On the iPhone the text is read on the device; only the web preview still uploads to OCR.space.
+  async function readCard(): Promise<string> {
+    const photo = await cam.current!.takePictureAsync({ quality: 0.5, shutterSound: false });
     const ctx = ImageManipulator.manipulate(photo.uri);
-    ctx.resize({ width: 1100 });
+    ctx.resize({ width: 1100 }); // also bakes in the orientation
     const img = await ctx.renderAsync();
-    const out = await img.saveAsync({ format: SaveFormat.JPEG, compress: 0.6, base64: true });
-    return out.base64 ?? '';
+    const out = await img.saveAsync({ format: SaveFormat.JPEG, compress: 0.6, base64: !hasOnDeviceOcr });
+    return hasOnDeviceOcr ? ocrOnDevice(out.uri) : ocr(out.base64 ?? '', settings.ocrKey);
   }
 
   // One capture → OCR → match → add. Returns false on a hard error (e.g. OCR limit).
   async function scanOnce(isAuto: boolean): Promise<boolean> {
     try {
       setStatus('Lese Karte …');
-      const text = await ocr(await capture(), settings.ocrKey);
+      const text = await readCard();
       const locked = lockedRef.current;
       const match = locked ? await matchCardInSet(text, locked) : await matchCard(text);
       if (!match) {
@@ -100,7 +101,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         setBusy(true);
         const ok = await scanOnce(true);
         setBusy(false);
-        await new Promise((r) => setTimeout(r, ok ? 250 : 3000));
+        await new Promise((r) => setTimeout(r, ok ? 100 : 2000));
       }
     })();
     return () => {
@@ -174,7 +175,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
             <Text style={styles.bigBtnText}>{auto ? 'Stopp' : 'Cardslinger-Modus'}</Text>
           </Pressable>
         </View>
-        {!settings.ocrKey && (
+        {!hasOnDeviceOcr && !settings.ocrKey && (
           <Pressable onPress={onOpenSettings}>
             <Text style={styles.hint}>Tipp: Mit einem kostenlosen OCR-Schlüssel in den Einstellungen geht es ohne Limit ›</Text>
           </Pressable>

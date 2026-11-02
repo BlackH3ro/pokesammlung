@@ -160,7 +160,8 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
 
           <Text style={styles.h}>Karten-Scanner (OCR.space)</Text>
           <Text style={styles.p}>
-            Ohne eigenen Schlüssel nutzt die App den öffentlichen Demo-Schlüssel, der schnell ans Limit kommt. Ein kostenloser
+            Auf dem iPhone liest die App die Karten direkt auf dem Gerät – dafür braucht es keinen Schlüssel. OCR.space wird
+            nur in der Browser-Vorschau benutzt. Ohne eigenen Schlüssel nutzt die App den öffentlichen Demo-Schlüssel, der schnell ans Limit kommt. Ein kostenloser
             Schlüssel reicht für 25.000 Scans im Monat.
           </Text>
           <Pressable onPress={() => Linking.openURL('https://ocr.space/ocrapi/freekey')}>
