@@ -85,11 +85,12 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
 
   const alarms = Object.values(col.wants).filter(isAlarm);
 
-  const mineStats = mine
-    .map((s) => ({ set: s, stats: setStats(s, col, col.mode[s.id] ?? 'master') }))
-    .filter((m) => m.stats.have > 0 || m.stats.ownedValue > 0)
-    // Closest to complete first.
-    .sort((a, b) => b.stats.have / (b.stats.need || 1) - a.stats.have / (a.stats.need || 1));
+  // Progress of started sets, shown right in their row of the set list.
+  const statsById = new Map(
+    mine
+      .map((s) => [s.id, setStats(s, col, col.mode[s.id] ?? 'master')] as const)
+      .filter(([, stats]) => stats.have > 0 || stats.ownedValue > 0),
+  );
   // Same figure as the Sammlung tab, independent of which sets are loaded.
   const totalValue = cardsValue(col.owned, col.meta);
 
@@ -117,23 +118,6 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
         <Text style={styles.summaryLabel}>Sammlungswert (Cardmarket-Trend)</Text>
         <Text style={styles.summaryValue}>{eur(totalValue)}</Text>
       </View>
-
-      {mineStats.length > 0 && <Text style={styles.section}>Meine Sets</Text>}
-      {mineStats.map(({ set, stats }) => (
-        <Pressable key={set.id} style={styles.mineRow} onPress={() => onOpenSet(set)}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.setName}>{set.name}</Text>
-            <Text style={styles.meta}>
-              {Math.floor((stats.have / (stats.need || 1)) * 100)} % · {stats.have} / {stats.need} · {(col.mode[set.id] ?? 'master') === 'master' ? 'Masterset' : 'Grundset'} · fehlt{' '}
-              {eur(stats.missingValue)}
-            </Text>
-            <View style={{ marginTop: 6 }}>
-              <Progress have={stats.have} need={stats.need} />
-            </View>
-          </View>
-          <Text style={styles.mineValue}>{eur(stats.ownedValue)}</Text>
-        </Pressable>
-      ))}
 
       <TextInput
         style={styles.search}
@@ -207,6 +191,7 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
       sections={sections}
       keyExtractor={(item) => item.id}
       ListHeaderComponent={header}
+      extraData={statsById}
       stickySectionHeadersEnabled={false}
       keyboardShouldPersistTaps="handled"
       refreshControl={
@@ -219,7 +204,9 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
         />
       }
       renderSectionHeader={({ section }) => <Text style={styles.section}>{section.title}</Text>}
-      renderItem={({ item }) => (
+      renderItem={({ item }) => {
+        const stats = statsById.get(item.id);
+        return (
         <Pressable style={styles.row} onPress={() => onOpenSet(item)}>
           <View style={styles.logoBox}>
             <FallbackImage
@@ -231,13 +218,26 @@ export default function HomeScreen({ onOpenSet, onOpenWants }: Props) {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.setName}>{item.name}</Text>
-            <Text style={styles.meta}>
-              {item.total} Karten{item.total !== item.official && item.official ? ` (${item.official} + ${item.total - item.official} Secrets)` : ''}
-            </Text>
+            {stats ? (
+              <>
+                <Text style={styles.meta}>
+                  {Math.floor((stats.have / (stats.need || 1)) * 100)} % · {stats.have} / {stats.need}
+                  {(col.mode[item.id] ?? 'master') === 'master' ? '' : ' (Grundset)'} · {eur(stats.ownedValue)}
+                </Text>
+                <View style={{ marginTop: 6 }}>
+                  <Progress have={stats.have} need={stats.need} />
+                </View>
+              </>
+            ) : (
+              <Text style={styles.meta}>
+                {item.total} Karten{item.total !== item.official && item.official ? ` (${item.official} + ${item.total - item.official} Secrets)` : ''}
+              </Text>
+            )}
           </View>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
-      )}
+        );
+      }}
     />
     {openCard && <CardSheet card={openCard.card} set={openCard.set} onClose={() => setOpenCard(null)} />}
     </>
@@ -284,8 +284,6 @@ const makeStyles = (colors: Palette) =>
   summaryLabel: { color: '#FFE4DC', fontSize: 13 },
   summaryValue: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 2 },
   section: { fontSize: 13, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', marginTop: 20, marginBottom: 8 },
-  mineRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 12, padding: 12, marginBottom: 8 },
-  mineValue: { fontWeight: '700', color: colors.text, marginLeft: 12 },
   search: {
     backgroundColor: colors.card,
     borderRadius: 10,
