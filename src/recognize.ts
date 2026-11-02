@@ -1,5 +1,6 @@
 import { requireOptionalNativeModule } from 'expo';
 import { fetchCardRaw, getCard, loadSeries, SetBrief } from './api';
+import { CardIndex, numberKey } from './cardIndex';
 import type { Card } from './api';
 
 export type Match = { card: Card; setId: string; setName: string; confident: boolean };
@@ -155,4 +156,28 @@ export async function matchCardInSet(text: string, set: { id: string; name: stri
   const sameName = scored.filter((s) => s.name === 2).length;
   const confident = (best.num && best.name > 0) || (best.name === 2 && sameName === 1);
   return { card: best.card, setId: set.id, setName: set.name, confident };
+}
+
+// ---- Live mode: match one video frame's text against the local card index ----
+
+export type LiveHit = { id: string; confident: boolean };
+
+export function matchLive(text: string, idx: CardIndex): LiveHit | null {
+  const parsed = parseNumber(text);
+  if (!parsed) return null;
+  const total = parseInt(parsed.total, 10);
+  const all = idx.byNumber.get(numberKey(parsed.prefix, parsed.number)) ?? [];
+  // Plain numbers must fit the printed total ("025/165"); prefixed ones (TG05/TG30) have their own count.
+  const candidates = parsed.prefix ? all : all.filter((c) => idx.printed.get(c.setId) === total);
+  if (!candidates.length) return null;
+  let best = candidates[0];
+  let bestScore = -1;
+  for (const c of candidates) {
+    const score = Math.max(nameScore(text, c.de), nameScore(text, c.en));
+    if (score > bestScore) {
+      best = c;
+      bestScore = score;
+    }
+  }
+  return { id: best.id, confident: bestScore > 0 || candidates.length === 1 };
 }

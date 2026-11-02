@@ -3,9 +3,11 @@ import * as Haptics from 'expo-haptics';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Card, cardImages, loadSeries, loadSet, SetBrief, SetDetail } from './api';
+import { Card, cardImages, getCard, loadSeries, loadSet, SetBrief, SetDetail } from './api';
+import { CardIndex, loadCardIndex } from './cardIndex';
 import { useCollection } from './collection';
-import { hasOnDeviceOcr, matchCard, matchCardInSet, ocr, ocrOnDevice } from './recognize';
+import { LiveCamera } from './LiveCamera';
+import { hasOnDeviceOcr, Match, matchCard, matchCardInSet, matchLive, ocr, ocrOnDevice, parseNumber } from './recognize';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
@@ -42,7 +44,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   useEffect(() => {
     lockedRef.current = lockedSet;
   }, [lockedSet]);
-  const [status, setStatus] = useState('Karte in den Rahmen legen');
+  const [status, setStatus] = useState(LiveCamera ? 'Lade Kartenliste …' : 'Karte in den Rahmen legen');
   const [scans, setScans] = useState<Scan[]>([]);
   const lastSeen = useRef<string | null>(null);
   const prefRef = useRef(pref);
@@ -60,6 +62,75 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     return hasOnDeviceOcr ? ocrOnDevice(out.uri) : ocr(out.base64 ?? '', settings.ocrKey);
   }
 
+  function addMatch(match: Match) {
+    const vKey = pickVariant(match.card, prefRef.current);
+    col.addOne({ id: match.setId, name: match.setName }, match.card, vKey);
+    setScans((s) => [{ id: Date.now(), ...match, vKey, unsure: !match.confident }, ...s].slice(0, 200));
+    setStatus(`✓ ${match.card.name} (${match.setName} ${match.card.localId})${match.confident ? '' : ' – bitte prüfen'}`);
+    haptic(Haptics.NotificationFeedbackType.Success);
+  }
+
+  // ---- Live mode (iPhone): text arrives several times a second straight from the video ----
+  const [paused, setPaused] = useState(false);
+  const [torch, setTorch] = useState(false);
+  const idx = useRef<CardIndex | null>(null);
+  const live = useRef({ candidate: '', streak: 0, lastAdded: '', working: false });
+
+  useEffect(() => {
+    if (!LiveCamera) return;
+    loadCardIndex()
+      .then((i) => {
+        idx.current = i;
+        setStatus('Karte ins Bild halten');
+      })
+      .catch(() => setStatus('Kartenliste konnte nicht geladen werden – Internet prüfen'));
+  }, []);
+
+  async function onFrame(text: string) {
+    const L = live.current;
+    if (L.working) return;
+    const locked = lockedRef.current;
+    L.working = true;
+    try {
+      let hit: { id: string; confident: boolean; match?: Match } | null = null;
+      if (locked) {
+        const m = await matchCardInSet(text, locked);
+        if (m) hit = { id: m.card.id, confident: m.confident, match: m };
+      } else if (idx.current) {
+        hit = matchLive(text, idx.current);
+      }
+      if (!hit) {
+        L.candidate = '';
+        L.streak = 0;
+        if (idx.current || locked) setStatus(parseNumber(text) ? 'Nummer gelesen – Karte gerade halten' : 'Karte ins Bild halten');
+        return;
+      }
+      // The card just saved is never saved again automatically – only after another card (a second copy goes via +1).
+      if (hit.id === L.lastAdded) return;
+      L.streak = hit.id === L.candidate ? L.streak + 1 : 1;
+      L.candidate = hit.id;
+      // Two matching frames in a row; more when the name was not readable.
+      if (L.streak < (hit.confident ? 2 : 6)) {
+        setStatus('Erkenne …');
+        return;
+      }
+      let match = hit.match ?? null;
+      if (!match) {
+        const res = await getCard(hit.id);
+        if (res) match = { card: res.card, setId: res.setId, setName: res.setName, confident: hit.confident };
+      }
+      if (!match) return;
+      L.lastAdded = hit.id;
+      L.candidate = '';
+      L.streak = 0;
+      addMatch(match);
+    } catch (e: any) {
+      setStatus('Fehler: ' + (e?.message ?? String(e)));
+    } finally {
+      L.working = false;
+    }
+  }
+
   // One capture → OCR → match → add. Returns false on a hard error (e.g. OCR limit).
   async function scanOnce(isAuto: boolean): Promise<boolean> {
     try {
@@ -68,7 +139,6 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
       const locked = lockedRef.current;
       const match = locked ? await matchCardInSet(text, locked) : await matchCard(text);
       if (!match) {
-        lastSeen.current = null; // gap between cards: the next card may be a duplicate again
         setStatus(text.trim() ? 'Nummer nicht gefunden – Karte gerade halten' : 'Keine Karte erkannt');
         if (!isAuto) haptic(Haptics.NotificationFeedbackType.Warning);
         return true;
@@ -78,11 +148,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         return true;
       }
       lastSeen.current = match.card.id;
-      const vKey = pickVariant(match.card, prefRef.current);
-      col.addOne({ id: match.setId, name: match.setName }, match.card, vKey);
-      setScans((s) => [{ id: Date.now(), ...match, vKey, unsure: !match.confident }, ...s].slice(0, 200));
-      setStatus(`✓ ${match.card.name} (${match.setName} ${match.card.localId})${match.confident ? '' : ' – bitte prüfen'}`);
-      haptic(Haptics.NotificationFeedbackType.Success);
+      addMatch(match);
       return true;
     } catch (e: any) {
       setStatus('Fehler: ' + (e?.message ?? String(e)));
@@ -121,6 +187,13 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     setScans((list) => list.filter((x) => x.id !== s.id));
   };
 
+  // A second copy of a scanned card is added by hand – the scanner never saves the same card twice in a row.
+  const addAgain = (s: Scan) => {
+    col.addOne({ id: s.setId, name: s.setName }, s.card, s.vKey);
+    setScans((list) => [{ ...s, id: Date.now() }, ...list].slice(0, 200));
+    haptic(Haptics.NotificationFeedbackType.Success);
+  };
+
   const cycleVariant = (s: Scan) => {
     const i = s.card.variants.findIndex((v) => v.key === s.vKey);
     const next = s.card.variants[(i + 1) % s.card.variants.length].key;
@@ -148,7 +221,11 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={styles.camWrap}>
-        <CameraView ref={cam} style={StyleSheet.absoluteFill} facing="back" autofocus="on" onCameraReady={() => setReady(true)} />
+        {LiveCamera ? (
+          <LiveCamera style={StyleSheet.absoluteFill} active={!paused} torch={torch} onText={(e) => onFrame(e.nativeEvent.text)} />
+        ) : (
+          <CameraView ref={cam} style={StyleSheet.absoluteFill} facing="back" autofocus="on" onCameraReady={() => setReady(true)} />
+        )}
         <View style={styles.frame} pointerEvents="none" />
         <View style={styles.statusBar}>
           <Text style={styles.statusText} numberOfLines={2}>
@@ -167,14 +244,25 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
             {scans.length} · {eur(sessionValue)}
           </Text>
         </View>
-        <View style={styles.row}>
-          <Pressable style={[styles.bigBtn, { flex: 1 }, (busy || auto) && styles.disabled]} onPress={single} disabled={busy || auto}>
-            <Text style={styles.bigBtnText}>{busy && !auto ? 'Scanne …' : 'Einzeln scannen'}</Text>
-          </Pressable>
-          <Pressable style={[styles.bigBtn, { flex: 1 }, auto && styles.stopBtn]} onPress={() => setAuto((a) => !a)}>
-            <Text style={styles.bigBtnText}>{auto ? 'Stopp' : 'Cardslinger-Modus'}</Text>
-          </Pressable>
-        </View>
+        {LiveCamera ? (
+          <View style={styles.row}>
+            <Pressable style={[styles.bigBtn, { flex: 1 }, !paused && styles.stopBtn]} onPress={() => setPaused((p) => !p)}>
+              <Text style={styles.bigBtnText}>{paused ? 'Weiter scannen' : 'Pause'}</Text>
+            </Pressable>
+            <Pressable style={[styles.bigBtn, { flex: 1 }]} onPress={() => setTorch((t) => !t)}>
+              <Text style={styles.bigBtnText}>{torch ? 'Licht aus' : 'Licht an'}</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.row}>
+            <Pressable style={[styles.bigBtn, { flex: 1 }, (busy || auto) && styles.disabled]} onPress={single} disabled={busy || auto}>
+              <Text style={styles.bigBtnText}>{busy && !auto ? 'Scanne …' : 'Einzeln scannen'}</Text>
+            </Pressable>
+            <Pressable style={[styles.bigBtn, { flex: 1 }, auto && styles.stopBtn]} onPress={() => setAuto((a) => !a)}>
+              <Text style={styles.bigBtnText}>{auto ? 'Stopp' : 'Cardslinger-Modus'}</Text>
+            </Pressable>
+          </View>
+        )}
         {!hasOnDeviceOcr && !settings.ocrKey && (
           <Pressable onPress={onOpenSettings}>
             <Text style={styles.hint}>Tipp: Mit einem kostenlosen OCR-Schlüssel in den Einstellungen geht es ohne Limit ›</Text>
@@ -197,7 +285,9 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
         ListEmptyComponent={
           <Text style={styles.hint}>
-            Einzeln: Karte hinlegen und tippen. Cardslinger-Modus: Die App scannt durchgehend und trägt jede neue Karte ein.
+            {LiveCamera
+              ? 'Karte einfach ins Bild halten – sie wird automatisch erkannt und einmal eingetragen. Mit dem Cardslinger die Karten nacheinander durchlaufen lassen.'
+              : 'Einzeln: Karte hinlegen und tippen. Cardslinger-Modus: Die App scannt durchgehend und trägt jede neue Karte ein.'}
           </Text>
         }
         renderItem={({ item }) => {
@@ -220,6 +310,9 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
                 </Pressable>
               </View>
               <Text style={styles.price}>{eur(v?.price)}</Text>
+              <Pressable onPress={() => addAgain(item)} hitSlop={8} style={styles.again} accessibilityLabel="Noch ein Exemplar hinzufügen">
+                <Text style={styles.againText}>+1</Text>
+              </Pressable>
               <Pressable onPress={() => undo(item)} hitSlop={8} style={styles.undo}>
                 <Text style={styles.undoText}>✕</Text>
               </Pressable>
@@ -362,6 +455,8 @@ const makeStyles = (colors: Palette) =>
   meta: { fontSize: 12, color: colors.muted },
   variant: { fontSize: 12, color: colors.accent, fontWeight: '600', marginTop: 2 },
   price: { fontSize: 14, fontWeight: '700', color: colors.text },
+  again: { paddingHorizontal: 8, paddingVertical: 4, marginLeft: 8, borderRadius: 8, backgroundColor: colors.chip },
+  againText: { fontSize: 14, fontWeight: '700', color: colors.text },
   undo: { padding: 6 },
   undoText: { fontSize: 16, color: colors.muted },
 });
