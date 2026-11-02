@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +29,12 @@ jobs:
         working-directory: ios
         run: pod install
 
+      - name: Show Xcode version
+        run: xcodebuild -version
+
       - name: Build (unsigned, Release)
         run: |
+          set -o pipefail
           WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "Workspace: $WORKSPACE, scheme: $SCHEME"
@@ -42,15 +46,30 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build | tail -n 200
+            build > xcodebuild.log 2>&1 || {
+              echo "::error::xcodebuild failed – relevant lines:"
+              grep -n -E "error:|ERROR|Error:|failed|fatal" xcodebuild.log | head -n 80
+              tail -n 120 xcodebuild.log
+              exit 1
+            }
+          tail -n 20 xcodebuild.log
 
       - name: Package .ipa
         run: |
           APP=$(ls -d build/Build/Products/Release-iphoneos/*.app | head -1)
+          test -n "$APP" || { echo "::error::No .app found"; exit 1; }
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry Pokesammlung.ipa Payload
           ls -lh Pokesammlung.ipa
+          test $(stat -f%z Pokesammlung.ipa) -gt 1000000 || { echo "::error::IPA is suspiciously small"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         with:
