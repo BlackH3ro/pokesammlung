@@ -5,14 +5,14 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card, cardImages, getCard, loadSeries, loadSet, SetBrief, SetDetail } from './api';
 import { CardIndex, loadCardIndex } from './cardIndex';
-import { useCollection } from './collection';
-import { LiveCamera } from './LiveCamera';
-import { hasOnDeviceOcr, Match, matchCard, matchCardInSet, matchLive, ocr, ocrOnDevice, parseNumber } from './recognize';
+import { Lang, LANGS, useCollection } from './collection';
+import { ImageHit, LiveCamera } from './LiveCamera';
+import { combineHits, detectLang, hasOnDeviceOcr, Match, matchCard, matchCardInSet, matchLive, ocr, ocrOnDevice, parseNumber } from './recognize';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
 
-type Scan = { id: number; card: Card; setId: string; setName: string; vKey: string; unsure: boolean };
+type Scan = { id: number; card: Card; setId: string; setName: string; vKey: string; unsure: boolean; lang?: Lang };
 type VariantPref = 'normal' | 'reverse';
 
 function pickVariant(card: Card, pref: VariantPref) {
@@ -62,10 +62,10 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     return hasOnDeviceOcr ? ocrOnDevice(out.uri) : ocr(out.base64 ?? '', settings.ocrKey);
   }
 
-  function addMatch(match: Match) {
+  function addMatch(match: Match, lang?: Lang) {
     const vKey = pickVariant(match.card, prefRef.current);
-    col.addOne({ id: match.setId, name: match.setName }, match.card, vKey);
-    setScans((s) => [{ id: Date.now(), ...match, vKey, unsure: !match.confident }, ...s].slice(0, 200));
+    col.addOne({ id: match.setId, name: match.setName }, match.card, vKey, lang);
+    setScans((s) => [{ id: Date.now(), ...match, vKey, unsure: !match.confident, lang }, ...s].slice(0, 200));
     setStatus(`✓ ${match.card.name} (${match.setName} ${match.card.localId})${match.confident ? '' : ' – bitte prüfen'}`);
     haptic(Haptics.NotificationFeedbackType.Success);
   }
@@ -74,7 +74,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   const [paused, setPaused] = useState(false);
   const [torch, setTorch] = useState(false);
   const idx = useRef<CardIndex | null>(null);
-  const live = useRef({ candidate: '', streak: 0, lastAdded: '', working: false });
+  const live = useRef({ candidate: '', streak: 0, lastAdded: '', lang: undefined as Lang | undefined, working: false });
 
   useEffect(() => {
     if (!LiveCamera) return;
@@ -86,7 +86,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
       .catch(() => setStatus('Kartenliste konnte nicht geladen werden – Internet prüfen'));
   }, []);
 
-  async function onFrame(text: string) {
+  async function onFrame(text: string, image?: ImageHit[]) {
     const L = live.current;
     if (L.working) return;
     const locked = lockedRef.current;
@@ -97,7 +97,8 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         const m = await matchCardInSet(text, locked);
         if (m) hit = { id: m.card.id, confident: m.confident, match: m };
       } else if (idx.current) {
-        hit = matchLive(text, idx.current);
+        const known = idx.current.ids;
+        hit = combineHits(matchLive(text, idx.current), image, (id) => known.has(id));
       }
       if (!hit) {
         L.candidate = '';
@@ -109,6 +110,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
       if (hit.id === L.lastAdded) return;
       L.streak = hit.id === L.candidate ? L.streak + 1 : 1;
       L.candidate = hit.id;
+      L.lang = detectLang(text) ?? (L.streak === 1 ? undefined : L.lang);
       // Two matching frames in a row; more when the name was not readable.
       if (L.streak < (hit.confident ? 2 : 6)) {
         setStatus('Erkenne …');
@@ -123,7 +125,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
       L.lastAdded = hit.id;
       L.candidate = '';
       L.streak = 0;
-      addMatch(match);
+      addMatch(match, L.lang);
     } catch (e: any) {
       setStatus('Fehler: ' + (e?.message ?? String(e)));
     } finally {
@@ -148,7 +150,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         return true;
       }
       lastSeen.current = match.card.id;
-      addMatch(match);
+      addMatch(match, detectLang(text) ?? undefined);
       return true;
     } catch (e: any) {
       setStatus('Fehler: ' + (e?.message ?? String(e)));
@@ -183,13 +185,13 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   };
 
   const undo = (s: Scan) => {
-    col.setCount({ id: s.setId, name: s.setName }, s.card, s.vKey, col.count(s.card.id, s.vKey) - 1);
+    col.setCount({ id: s.setId, name: s.setName }, s.card, s.vKey, col.count(s.card.id, s.vKey) - 1, s.lang);
     setScans((list) => list.filter((x) => x.id !== s.id));
   };
 
   // A second copy of a scanned card is added by hand – the scanner never saves the same card twice in a row.
   const addAgain = (s: Scan) => {
-    col.addOne({ id: s.setId, name: s.setName }, s.card, s.vKey);
+    col.addOne({ id: s.setId, name: s.setName }, s.card, s.vKey, s.lang);
     setScans((list) => [{ ...s, id: Date.now() }, ...list].slice(0, 200));
     haptic(Haptics.NotificationFeedbackType.Success);
   };
@@ -199,8 +201,8 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     const next = s.card.variants[(i + 1) % s.card.variants.length].key;
     if (next === s.vKey) return;
     const set = { id: s.setId, name: s.setName };
-    col.setCount(set, s.card, s.vKey, col.count(s.card.id, s.vKey) - 1);
-    col.addOne(set, s.card, next);
+    col.setCount(set, s.card, s.vKey, col.count(s.card.id, s.vKey) - 1, s.lang);
+    col.addOne(set, s.card, next, s.lang);
     setScans((list) => list.map((x) => (x.id === s.id ? { ...x, vKey: next } : x)));
   };
 
@@ -222,7 +224,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={styles.camWrap}>
         {LiveCamera ? (
-          <LiveCamera style={StyleSheet.absoluteFill} active={!paused} torch={torch} onText={(e) => onFrame(e.nativeEvent.text)} />
+          <LiveCamera style={StyleSheet.absoluteFill} active={!paused} torch={torch} onText={(e) => onFrame(e.nativeEvent.text, e.nativeEvent.image)} />
         ) : (
           <CameraView ref={cam} style={StyleSheet.absoluteFill} facing="back" autofocus="on" onCameraReady={() => setReady(true)} />
         )}
@@ -301,6 +303,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
                 </Text>
                 <Text style={styles.meta} numberOfLines={1}>
                   {item.setName} · {item.card.localId}
+                  {item.lang ? ` · ${LANGS.find((l) => l.id === item.lang)?.label}` : ''}
                   {item.unsure ? ' · unsicher' : ''}
                 </Text>
                 <Pressable onPress={() => cycleVariant(item)} hitSlop={6}>

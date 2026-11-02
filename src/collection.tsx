@@ -48,8 +48,21 @@ export type Want = {
   checkedAt?: number;
 };
 
+export const LANGS = [
+  { id: 'de', label: 'DE' },
+  { id: 'en', label: 'EN' },
+  { id: 'fr', label: 'FR' },
+  { id: 'it', label: 'IT' },
+  { id: 'es', label: 'ES' },
+  { id: 'pt', label: 'PT' },
+  { id: 'ja', label: 'JP' },
+] as const;
+export type Lang = (typeof LANGS)[number]['id'];
+
 type State = {
   owned: Record<string, number>; // "cardId|variantKey" -> count
+  // "cardId|variantKey" -> copies per language. May cover fewer copies than `owned` (language unknown).
+  langs: Record<string, Partial<Record<Lang, number>>>;
   addedAt: Record<string, number>; // "cardId|variantKey" -> first time it was added
   excluded: Record<string, true>; // cardId -> not counted (e.g. ultra-rare promos)
   mode: Record<string, Mode>; // setId -> tracking mode
@@ -64,7 +77,7 @@ type State = {
 
 export type ValuePoint = { d: string; cards: number; slabs: number };
 
-const EMPTY: State = { addedAt: {}, owned: {}, excluded: {}, mode: {}, started: {}, meta: {}, slabs: [], sealed: [], wants: {}, wantsCheckedAt: 0, history: [] };
+const EMPTY: State = { addedAt: {}, owned: {}, langs: {}, excluded: {}, mode: {}, started: {}, meta: {}, slabs: [], sealed: [], wants: {}, wantsCheckedAt: 0, history: [] };
 const KEY = 'collection:v1';
 
 export const slotKey = (cardId: string, variantKey: string) => `${cardId}|${variantKey}`;
@@ -74,8 +87,8 @@ type SetRef = { id: string; name: string };
 type Ctx = State & {
   ready: boolean;
   count: (cardId: string, variantKey: string) => number;
-  setCount: (set: SetRef, card: Card, variantKey: string, n: number) => void;
-  addOne: (set: SetRef, card: Card, variantKey: string) => void;
+  setCount: (set: SetRef, card: Card, variantKey: string, n: number, lang?: Lang) => void;
+  addOne: (set: SetRef, card: Card, variantKey: string, lang?: Lang) => void;
   remember: (cards: CardMeta[]) => void;
   toggleExcluded: (cardId: string) => void;
   setMode: (setId: string, mode: Mode) => void;
@@ -113,10 +126,11 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
 
   const count = useCallback((cardId: string, v: string) => state.owned[slotKey(cardId, v)] ?? 0, [state.owned]);
 
-  const update = useCallback((set: SetRef, card: Card, v: string, next: (n: number) => number) => {
+  const update = useCallback((set: SetRef, card: Card, v: string, next: (n: number) => number, lang?: Lang) => {
     setState((s) => {
       const k = slotKey(card.id, v);
-      const n = Math.max(0, next(s.owned[k] ?? 0));
+      const old = s.owned[k] ?? 0;
+      const n = Math.max(0, next(old));
       const owned = { ...s.owned };
       const addedAt = { ...s.addedAt };
       if (n > 0) {
@@ -134,6 +148,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       return {
         ...s,
         owned,
+        langs: adjustLangs(s.langs, k, old, n, lang),
         addedAt,
         wants,
         started: { ...s.started, [set.id]: set.name },
@@ -142,8 +157,11 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setCount = useCallback((set: SetRef, card: Card, v: string, n: number) => update(set, card, v, () => n), [update]);
-  const addOne = useCallback((set: SetRef, card: Card, v: string) => update(set, card, v, (n) => n + 1), [update]);
+  const setCount = useCallback(
+    (set: SetRef, card: Card, v: string, n: number, lang?: Lang) => update(set, card, v, () => n, lang),
+    [update],
+  );
+  const addOne = useCallback((set: SetRef, card: Card, v: string, lang?: Lang) => update(set, card, v, (n) => n + 1, lang), [update]);
 
   const remember = useCallback((cards: CardMeta[]) => {
     // Overwrites existing entries so prices stay as fresh as the set data they came from.
@@ -255,11 +273,18 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       if (!merge) return incoming;
       const owned = { ...s.owned };
       for (const [k, n] of Object.entries(incoming.owned)) owned[k] = Math.max(owned[k] ?? 0, n);
+      const langs = { ...s.langs };
+      for (const [k, per] of Object.entries(incoming.langs)) {
+        const mine = { ...langs[k] };
+        for (const [l, n] of Object.entries(per)) mine[l as Lang] = Math.max(mine[l as Lang] ?? 0, n ?? 0);
+        langs[k] = mine;
+      }
       const slabIds = new Set(s.slabs.map((x) => x.id));
       const byDay = new Map(s.history.map((h) => [h.d, h]));
       for (const h of incoming.history) if (!byDay.has(h.d)) byDay.set(h.d, h);
       return {
         owned,
+        langs,
         addedAt: { ...incoming.addedAt, ...s.addedAt },
         excluded: { ...incoming.excluded, ...s.excluded },
         mode: { ...incoming.mode, ...s.mode },
@@ -339,6 +364,44 @@ export function setStats(set: SetDetail, c: Pick<State, 'owned' | 'excluded'>, m
     }
   }
   return s;
+}
+
+// Keeps the per-language counts in step with a slot's new total. Added copies go to `lang`;
+// removed ones come from `lang` first, then from the language with the most copies.
+function adjustLangs(all: State['langs'], k: string, old: number, n: number, lang?: Lang): State['langs'] {
+  const cur: Partial<Record<Lang, number>> = { ...all[k] };
+  if (n > old && lang) cur[lang] = (cur[lang] ?? 0) + (n - old);
+  if (n < old) {
+    let drop = old - n;
+    if (lang && cur[lang]) {
+      const d = Math.min(cur[lang]!, drop);
+      cur[lang]! -= d;
+      drop -= d;
+    }
+    // Only assigned copies beyond the new total have to go; unknown-language copies are removed first.
+    let extra = Object.values(cur).reduce((a, b) => a + (b ?? 0), 0) - n;
+    for (const l of (Object.keys(cur) as Lang[]).sort((a, b) => (cur[b] ?? 0) - (cur[a] ?? 0))) {
+      const d = Math.min(cur[l] ?? 0, Math.max(0, extra));
+      cur[l] = (cur[l] ?? 0) - d;
+      extra -= d;
+    }
+  }
+  for (const l of Object.keys(cur) as Lang[]) if (!cur[l]) delete cur[l];
+  if (!Object.keys(cur).length) {
+    if (!all[k]) return all;
+    const rest = { ...all };
+    delete rest[k];
+    return rest;
+  }
+  return { ...all, [k]: cur };
+}
+
+// "DE 2 · EN 1", plus "? 1" for copies without a known language.
+export function langSummary(per: Partial<Record<Lang, number>> | undefined, total: number) {
+  const parts = LANGS.filter((l) => per?.[l.id]).map((l) => `${l.label} ${per![l.id]}`);
+  const known = Object.values(per ?? {}).reduce((a, b) => a + (b ?? 0), 0);
+  if (parts.length && total > known) parts.push(`? ${total - known}`);
+  return parts.join(' · ');
 }
 
 export function cardComplete(card: Card, owned: Record<string, number>, mode: Mode) {

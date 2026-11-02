@@ -14,7 +14,8 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'Vision', 'AVFoundation'
+  s.frameworks = 'Vision', 'AVFoundation', 'Accelerate', 'CoreImage'
+  s.resource_bundles = { 'CardPrints' => ['CardPrints/*'] }
 
   s.source_files = "**/*.{h,m,swift}"
   s.pod_target_xcconfig = {

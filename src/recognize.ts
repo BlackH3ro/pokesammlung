@@ -1,6 +1,8 @@
 import { requireOptionalNativeModule } from 'expo';
 import { fetchCardRaw, getCard, loadSeries, SetBrief } from './api';
 import { CardIndex, numberKey } from './cardIndex';
+import type { Lang } from './collection';
+import type { ImageHit } from './LiveCamera';
 import type { Card } from './api';
 
 export type Match = { card: Card; setId: string; setName: string; confident: boolean };
@@ -160,7 +162,7 @@ export async function matchCardInSet(text: string, set: { id: string; name: stri
 
 // ---- Live mode: match one video frame's text against the local card index ----
 
-export type LiveHit = { id: string; confident: boolean };
+export type LiveHit = { id: string; confident: boolean; candidates: string[] };
 
 export function matchLive(text: string, idx: CardIndex): LiveHit | null {
   const parsed = parseNumber(text);
@@ -179,5 +181,50 @@ export function matchLive(text: string, idx: CardIndex): LiveHit | null {
       bestScore = score;
     }
   }
-  return { id: best.id, confident: bestScore > 0 || candidates.length === 1 };
+  return { id: best.id, confident: bestScore > 0 || candidates.length === 1, candidates: candidates.map((c) => c.id) };
+}
+
+// ---- Card language from the printed words (HP/KP, Weakness/Schwäche …) ----
+
+const LANG_WORDS: [Lang, RegExp][] = [
+  ['de', /\b(KP|Schwäche|Schwache|Resistenz|Rückzug|Ruckzug|Fähigkeit|Fahigkeit|Entwickelt|Basis|Phase)\b/gi],
+  ['en', /\b(HP|Weakness|Resistance|Retreat|Ability|Evolves|Basic|Stage)\b/gi],
+  ['fr', /\b(PV|Faiblesse|Résistance|Resistance|Retraite|Talent|Évolue|Evolue|Base|Niveau)\b/gi],
+  ['it', /\b(PS|Debolezza|Resistenza|Ritirata|Abilità|Abilita|Si evolve|Base|Fase)\b/gi],
+  ['es', /\b(PS|Debilidad|Resistencia|Retirada|Habilidad|Evoluciona|Básico|Basico|Fase)\b/gi],
+  ['pt', /\b(PS|Fraqueza|Resistência|Resistencia|Recuo|Habilidade|Evolui|Básico|Basico|Estágio)\b/gi],
+];
+
+// Best guess of the card's language, or null when the text gives no hint.
+export function detectLang(text: string): Lang | null {
+  if (/[぀-ヿ一-龯]/.test(text)) return 'ja';
+  let best: Lang | null = null;
+  let bestHits = 0;
+  for (const [lang, re] of LANG_WORDS) {
+    const hits = text.match(re)?.length ?? 0;
+    if (hits > bestHits) {
+      best = lang;
+      bestHits = hits;
+    }
+  }
+  return best;
+}
+
+// ---- Combining the text with the picture comparison ----
+
+
+// The picture decides when the number leaves several cards open (e.g. same number in two sets),
+// and stands in for the text when no number is readable (glare on full arts, sleeves …).
+export function combineHits(text: LiveHit | null, image: ImageHit[] | undefined, known: (id: string) => boolean): LiveHit | null {
+  const top = (image ?? []).filter((h) => known(h.id));
+  if (text) {
+    if (text.confident || !top.length) return text;
+    const pick = top.find((h) => text.candidates.includes(h.id));
+    return pick ? { ...text, id: pick.id, confident: true } : text;
+  }
+  // Picture only: the best match has to stand out clearly from the runner-up.
+  if (top.length && top[0].score >= 0.6 && (top.length === 1 || top[0].score - top[1].score >= 0.04)) {
+    return { id: top[0].id, confident: false, candidates: [top[0].id] };
+  }
+  return null;
 }

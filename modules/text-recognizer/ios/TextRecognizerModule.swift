@@ -26,7 +26,7 @@ public class TextRecognizerModule: Module {
       request.recognitionLevel = .accurate
       // Card numbers and names are not dictionary words; correction would "fix" them.
       request.usesLanguageCorrection = false
-      request.recognitionLanguages = ["de-DE", "en-US"]
+      request.recognitionLanguages = ["de-DE", "en-US", "fr-FR", "it-IT", "es-ES", "pt-BR"]
       DispatchQueue.global(qos: .userInitiated).async {
         do {
           try VNImageRequestHandler(url: url, options: [:]).perform([request])

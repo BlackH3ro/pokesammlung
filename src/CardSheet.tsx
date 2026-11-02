@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Card, cardImages } from './api';
-import { slotKey, useCollection } from './collection';
+import { Lang, LANGS, langSummary, slotKey, useCollection } from './collection';
 import GradingSheet from './GradingSheet';
 import { eur, FallbackImage, Trend } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
@@ -13,6 +13,7 @@ export default function CardSheet({ card, set, onClose }: Props) {
   const styles = useThemedStyles(makeStyles);
   const col = useCollection();
   const [grading, setGrading] = useState(false);
+  const [lang, setLang] = useState<Lang>('de');
   if (!card) return null;
   
   const excluded = !!col.excluded[card.id];
@@ -35,10 +36,19 @@ export default function CardSheet({ card, set, onClose }: Props) {
             {card.rarity ? ` · ${card.rarity}` : ''}
           </Text>
 
+          <View style={styles.langRow}>
+            <Text style={styles.langHint}>Sprache für + / −</Text>
+            {LANGS.map((l) => (
+              <Pressable key={l.id} onPress={() => setLang(l.id)} style={[styles.lang, lang === l.id && styles.langOn]}>
+                <Text style={[styles.langText, lang === l.id && styles.langTextOn]}>{l.label}</Text>
+              </Pressable>
+            ))}
+          </View>
           <View style={styles.box}>
             {card.variants.map((v, i) => {
               const n = col.count(card.id, v.key);
-              const change = (d: number) => col.setCount(set, card, v.key, Math.max(0, n + d));
+              const change = (d: number) => col.setCount(set, card, v.key, Math.max(0, n + d), lang);
+              const langs = langSummary(col.langs[slotKey(card.id, v.key)], n);
               const wanted = !!col.wants[slotKey(card.id, v.key)];
               return (
                 <View key={v.key} style={[styles.vRow, i > 0 && styles.sep]}>
@@ -49,6 +59,7 @@ export default function CardSheet({ card, set, onClose }: Props) {
                       {v.avg30 != null ? ` · Ø 30 Tage ${eur(v.avg30)}  ` : ''}
                       <Trend price={v.price} avg30={v.avg30} />
                     </Text>
+                    {!!langs && <Text style={styles.vLangs}>{langs}</Text>}
                   </View>
                   <Pressable
                     style={styles.heart}
@@ -152,6 +163,13 @@ const makeStyles = (colors: Palette) =>
   meta: { color: colors.muted, marginTop: 10, marginBottom: 12, textAlign: 'center' },
   box: { backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 14, alignSelf: 'stretch', marginBottom: 12, maxWidth: 520, width: '100%' },
   vRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  vLangs: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  langRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, alignSelf: 'stretch', marginTop: 12 },
+  langHint: { fontSize: 12, color: colors.muted, marginRight: 2 },
+  lang: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: colors.chip },
+  langOn: { backgroundColor: colors.accent },
+  langText: { fontSize: 12, fontWeight: '700', color: colors.text },
+  langTextOn: { color: '#fff' },
   sep: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   vLabel: { fontSize: 15, fontWeight: '600', color: colors.text },
   vPrice: { fontSize: 13, color: colors.muted, marginTop: 2 },

@@ -24,7 +24,8 @@ bleibt erhalten. In Sideloadly kann man „Automatic refresh“ aktivieren (PC u
 
 ## Einrichtung in der App (optional)
 
-- **OCR-Schlüssel** für den Scanner: kostenlos unter <https://ocr.space/ocrapi/freekey> (25.000 Scans/Monat).
+- Der Scanner liest Karten live auf dem iPhone (Apple Vision: Text + Bildabgleich), ohne Schlüssel.
+  Ein **OCR-Schlüssel** (<https://ocr.space/ocrapi/freekey>) wird nur für die Browser-Vorschau gebraucht.
 - **eBay-Schlüssel** für Slab-Preise: kostenloser Entwicklerzugang unter <https://developer.ebay.com/my/keys>,
   „Production“-Keys erstellen, App ID und Cert ID in den Einstellungen eintragen.
 

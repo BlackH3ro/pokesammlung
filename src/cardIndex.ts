@@ -9,6 +9,7 @@ export type IndexCard = { id: string; setId: string; de?: string; en?: string };
 export type CardIndex = {
   byNumber: Map<string, IndexCard[]>; // "25", "TG5", "SV49" → cards with that number
   printed: Map<string, number>; // set id → count printed on the cards ("…/165")
+  ids: Set<string>; // every card the scanner may report
 };
 
 const API = 'https://api.tcgdex.net/v2/';
@@ -61,6 +62,7 @@ export function loadCardIndex(): Promise<CardIndex> {
       const printed = new Map<string, number>();
       for (const s of series.flatMap((x) => x.sets)) printed.set(s.id, s.printed ?? s.official);
       const byNumber = new Map<string, IndexCard[]>();
+      const ids = new Set<string>();
       for (const [id, de, en] of data.cards) {
         const sep = id.lastIndexOf('-');
         const setId = id.slice(0, sep);
@@ -69,9 +71,10 @@ export function loadCardIndex(): Promise<CardIndex> {
         if (!key || !printed.has(setId) || isMergedChild(setId) || parentSet(setId) !== setId) continue;
         const list = byNumber.get(key) ?? [];
         list.push({ id, setId, de: de ?? undefined, en: en ?? undefined });
+        ids.add(id);
         byNumber.set(key, list);
       }
-      return { byNumber, printed };
+      return { byNumber, printed, ids };
     })
     .catch((e) => {
       index = null; // try again next time
