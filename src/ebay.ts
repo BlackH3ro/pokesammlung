@@ -94,12 +94,13 @@ export function ebayUrl(slab: Slab) {
   return 'https://www.ebay.de/sch/i.html?_nkw=' + encodeURIComponent(slabQueries(slab)[0]);
 }
 
-export const SEALED_KINDS = ['Display', 'Elite-Trainer-Box', 'Booster', 'Sleeved Booster', 'Collection Box', 'Tin', 'Blister', 'Bundle', 'Sonstiges'];
+export const SEALED_KINDS = ['Display', 'Elite-Trainer-Box', 'Pokémon Center ETB', 'Booster', 'Sleeved Booster', 'Collection Box', 'Tin', 'Blister', 'Bundle', 'Sonstiges'];
 
 // eBay search words per kind (German and English listings).
 const KIND_WORDS: Record<string, string> = {
   Display: 'display',
   'Elite-Trainer-Box': 'elite trainer box',
+  'Pokémon Center ETB': 'pokemon center elite trainer box',
   Booster: 'booster',
   'Sleeved Booster': 'sleeved booster',
   'Collection Box': 'collection box',
@@ -111,11 +112,17 @@ const KIND_WORDS: Record<string, string> = {
 
 const SEALED_BAD = /\b(leer|empty|code|codes|karte|card|single|einzel|nur|only|ohne|without|opened|geöffnet|offen|proxy|fake|case)\b/i;
 
+// Pokémon Center ETBs sell for much more than the normal ones, so each kind leaves out the other's listings.
+const POKEMON_CENTER = /pok[eé]mon[\s-]*center|\bpc\b/i;
+const kindFits = (kind: string, title: string) =>
+  kind === 'Pokémon Center ETB' ? POKEMON_CENTER.test(title) : kind !== 'Elite-Trainer-Box' || !POKEMON_CENTER.test(title);
+
 export function sealedQuery(item: { name: string; kind: string; language: string }) {
   const lang = LANGUAGES.find((l) => l.id === item.language)?.keyword ?? '';
-  const kind = KIND_WORDS[item.kind] ?? '';
-  const name = item.name.toLowerCase().includes(kind.split(' ')[0]) ? item.name : `${item.name} ${kind}`;
-  return `pokemon ${name} ${lang}`.replace(/\s+/g, ' ').trim();
+  const name = item.name.toLowerCase().replace(/é/g, 'e');
+  // Only the kind's words the name does not already contain.
+  const extra = (KIND_WORDS[item.kind] ?? '').split(' ').filter((w) => w && w !== 'pokemon' && !name.includes(w));
+  return `pokemon ${item.name} ${extra.join(' ')} ${lang}`.replace(/\s+/g, ' ').trim();
 }
 
 export const sealedEbayUrl = (item: { name: string; kind: string; language: string }) =>
@@ -129,7 +136,7 @@ export async function fetchSealedPrice(item: { name: string; kind: string; langu
   const words = item.name.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
   for (const market of ['EBAY_DE', 'EBAY_US']) {
     const items = (await search(q, market, tok)).filter(
-      (i) => i.price && !SEALED_BAD.test(i.title) && words.every((w) => i.title.toLowerCase().includes(w)),
+      (i) => i.price && !SEALED_BAD.test(i.title) && kindFits(item.kind, i.title) && words.every((w) => i.title.toLowerCase().includes(w)),
     );
     if (items.length >= 2) {
       const prices = await Promise.all(items.map((i) => toEur(parseFloat(i.price!.value), i.price!.currency)));

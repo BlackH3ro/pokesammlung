@@ -83,7 +83,7 @@ export default function SealedScreen({ header, onOpenSettings }: { header: React
         data={col.sealed}
         keyExtractor={(x) => x.id}
         ListHeaderComponent={top}
-        ListEmptyComponent={<Text style={styles.empty}>Noch keine Sealed-Produkte – z. B. Displays, Elite-Trainer-Boxen oder Tins.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>Noch keine Sealed-Produkte – z. B. Displays, Top-Trainer-Boxen (auch Pokémon Center) oder Tins.</Text>}
         renderItem={({ item }) => (
           <Pressable style={styles.row} onPress={() => setEditing(item)}>
             <View style={styles.kindBox}>
