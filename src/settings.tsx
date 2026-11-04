@@ -12,9 +12,11 @@ export type Settings = {
   ebayClientId: string;
   ebayClientSecret: string;
   theme: ThemeMode;
+  scanZoom: number; // live scanner: 0 = automatic
+  scanShift: number; // live scanner: −1 … 1, visible part of the picture
 };
 
-const EMPTY: Settings = { ocrKey: '', ebayClientId: '', ebayClientSecret: '', theme: 'system' };
+const EMPTY: Settings = { ocrKey: '', ebayClientId: '', ebayClientSecret: '', theme: 'system', scanZoom: 0, scanShift: 0 };
 const KEY = 'settings:v1';
 
 const SettingsContext = createContext<{ settings: Settings; save: (s: Settings) => void } | null>(null);
@@ -80,7 +82,7 @@ function SettingsForm({ onClose }: { onClose: () => void }) {
     setPending(null);
   };
 
-  const field = (label: string, key: keyof Settings, secret = false) => (
+  const field = (label: string, key: 'ocrKey' | 'ebayClientId' | 'ebayClientSecret', secret = false) => (
     <View style={{ marginBottom: 12 }}>
       <Text style={styles.label}>{label}</Text>
       <TextInput

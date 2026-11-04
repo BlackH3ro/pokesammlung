@@ -195,9 +195,18 @@ const LANG_WORDS: [Lang, RegExp][] = [
   ['pt', /\b(PS|Fraqueza|Resistência|Resistencia|Recuo|Habilidade|Evolui|Básico|Basico|Estágio)\b/gi],
 ];
 
+// Asian writing (a few characters, so a stray mark is not enough): kana = Japanese, hangul = Korean, only Chinese characters = Chinese.
+export function asianLang(text: string): Lang | null {
+  if ((text.match(/[぀-ヿ]/g)?.length ?? 0) >= 2) return 'ja';
+  if ((text.match(/[가-힯]/g)?.length ?? 0) >= 2) return 'ko';
+  if ((text.match(/[一-鿿]/g)?.length ?? 0) >= 3) return 'zh';
+  return null;
+}
+
 // Best guess of the card's language, or null when the text gives no hint.
 export function detectLang(text: string): Lang | null {
-  if (/[぀-ヿ一-龯]/.test(text)) return 'ja';
+  const asian = asianLang(text);
+  if (asian) return asian;
   let best: Lang | null = null;
   let bestHits = 0;
   for (const [lang, re] of LANG_WORDS) {
@@ -215,8 +224,21 @@ export function detectLang(text: string): Lang | null {
 
 // The picture decides when the number leaves several cards open (e.g. same number in two sets),
 // and stands in for the text when no number is readable (glare on full arts, sleeves …).
-export function combineHits(text: LiveHit | null, image: ImageHit[] | undefined, known: (id: string) => boolean): LiveHit | null {
+// Asian cards are not in the card list: their numbers belong to other sets, so only the picture counts
+// (same artwork as the German / English card), with a lower bar because frame and text differ.
+export function combineHits(
+  text: LiveHit | null,
+  image: ImageHit[] | undefined,
+  known: (id: string) => boolean,
+  asian = false,
+): LiveHit | null {
   const top = (image ?? []).filter((h) => known(h.id));
+  if (asian) {
+    if (top.length && top[0].score >= 0.5 && (top.length === 1 || top[0].score - top[1].score >= 0.03)) {
+      return { id: top[0].id, confident: false, candidates: [top[0].id] };
+    }
+    return null;
+  }
   if (text) {
     if (text.confident || !top.length) return text;
     const pick = top.find((h) => text.candidates.includes(h.id));

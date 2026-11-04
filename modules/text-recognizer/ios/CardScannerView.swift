@@ -9,6 +9,12 @@ import Vision
 class CardScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
   let onText = EventDispatcher()
   var active = true
+  // 0 = automatic (see zoomForCard). Set from JS, e.g. when a Cardslinger holds the phone farther away.
+  private var zoom: Double = 0
+  // Moves the visible part of the picture up (-1) or down (1). The preview is narrower than the video,
+  // so without this a card near the edge of the frame is cut off on screen.
+  var shift: Double = 0 { didSet { setNeedsLayout() } }
+  private var frameCount = 0
 
   private let session = AVCaptureSession()
   private let sessionQueue = DispatchQueue(label: "pokesammlung.scanner.session")
@@ -32,7 +38,10 @@ class CardScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    previewLayer.frame = bounds
+    // Full video picture (portrait 9:16) as wide as the view, moved by `shift` inside the view.
+    let full = max(bounds.height, bounds.width * 16 / 9)
+    let spare = full - bounds.height
+    previewLayer.frame = CGRect(x: 0, y: -spare / 2 * CGFloat(1 + shift), width: bounds.width, height: full)
   }
 
   override func didMoveToWindow() {
@@ -58,6 +67,22 @@ class CardScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
   }
 
+  func setZoom(_ value: Double) {
+    sessionQueue.async { [weak self] in
+      guard let self = self else { return }
+      self.zoom = value
+      guard let device = self.device else { return }
+      try? device.lockForConfiguration()
+      device.videoZoomFactor = self.zoomFactor(device)
+      device.unlockForConfiguration()
+    }
+  }
+
+  private func zoomFactor(_ device: AVCaptureDevice) -> CGFloat {
+    guard zoom > 0 else { return zoomForCard(device) }
+    return min(max(CGFloat(zoom), 1), min(device.activeFormat.videoMaxZoomFactor, 5))
+  }
+
   private func configureIfNeeded() {
     guard !configured else { return }
     configured = true
@@ -79,7 +104,7 @@ class CardScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
     if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
     if device.isAutoFocusRangeRestrictionSupported { device.autoFocusRangeRestriction = .near }
     if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
-    device.videoZoomFactor = zoomForCard(device)
+    device.videoZoomFactor = zoomFactor(device)
     device.unlockForConfiguration()
   }
 
@@ -108,7 +133,10 @@ class CardScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
     text.recognitionLevel = .accurate
     // Card numbers and names are not dictionary words; correction would "fix" them.
     text.usesLanguageCorrection = false
-    text.recognitionLanguages = ["de-DE", "en-US", "fr-FR", "it-IT", "es-ES", "pt-BR"]
+    // Every fourth frame looks for Japanese / Asian writing instead (Vision cannot read both in one pass).
+    frameCount += 1
+    let asian = frameCount % 4 == 0
+    text.recognitionLanguages = asian ? ["ja-JP", "en-US"] : ["de-DE", "en-US", "fr-FR", "it-IT", "es-ES", "pt-BR"]
 
     // The card's outline, so the picture comparison sees only the card and not the table around it.
     let outline = VNDetectRectanglesRequest()
@@ -131,10 +159,11 @@ class CardScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate {
       image = prints.nearest(vector, count: 5).map { ["id": $0.id, "score": $0.score] as [String: Any] }
     }
     let ms = Int(Date().timeIntervalSince(started) * 1000)
+    let zoomNow = Double(device?.videoZoomFactor ?? 1)
     busy = false
 
     DispatchQueue.main.async { [weak self] in
-      self?.onText(["text": lines.joined(separator: "\n"), "image": image, "ms": ms])
+      self?.onText(["text": lines.joined(separator: "\n"), "image": image, "ms": ms, "zoom": zoomNow, "asianPass": asian])
     }
   }
 

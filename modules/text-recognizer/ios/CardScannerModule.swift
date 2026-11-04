@@ -15,6 +15,14 @@ public class CardScannerModule: Module {
       Prop("torch") { (view: CardScannerView, torch: Bool?) in
         view.setTorch(torch ?? false)
       }
+
+      Prop("zoom") { (view: CardScannerView, zoom: Double?) in
+        view.setZoom(zoom ?? 0)
+      }
+
+      Prop("shift") { (view: CardScannerView, shift: Double?) in
+        view.shift = min(max(shift ?? 0, -1), 1)
+      }
     }
   }
 }

@@ -57,6 +57,8 @@ export const LANGS = [
   { id: 'es', label: 'ES' },
   { id: 'pt', label: 'PT' },
   { id: 'ja', label: 'JP' },
+  { id: 'ko', label: 'KO' },
+  { id: 'zh', label: 'ZH' },
 ] as const;
 export type Lang = (typeof LANGS)[number]['id'];
 

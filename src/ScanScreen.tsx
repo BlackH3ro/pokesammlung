@@ -7,7 +7,7 @@ import { Card, cardImages, getCard, loadSeries, loadSet, SetBrief, SetDetail } f
 import { CardIndex, loadCardIndex } from './cardIndex';
 import { Lang, LANGS, useCollection } from './collection';
 import { ImageHit, LiveCamera } from './LiveCamera';
-import { combineHits, detectLang, hasOnDeviceOcr, Match, matchCard, matchCardInSet, matchLive, ocr, ocrOnDevice, parseNumber } from './recognize';
+import { asianLang, combineHits, detectLang, hasOnDeviceOcr, Match, matchCard, matchCardInSet, matchLive, ocr, ocrOnDevice, parseNumber } from './recognize';
 import { useSettings } from './settings';
 import { Chip, eur, FallbackImage } from './ui';
 import { Palette, useColors, useThemedStyles } from './theme';
@@ -31,7 +31,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   const colors = useColors();
   const styles = useThemedStyles(makeStyles);
   const col = useCollection();
-  const { settings } = useSettings();
+  const { settings, save } = useSettings();
   const [permission, requestPermission] = useCameraPermissions();
   const cam = useRef<CameraView>(null);
   const [ready, setReady] = useState(false);
@@ -74,7 +74,14 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
   const [paused, setPaused] = useState(false);
   const [torch, setTorch] = useState(false);
   const idx = useRef<CardIndex | null>(null);
-  const live = useRef({ candidate: '', streak: 0, lastAdded: '', lang: undefined as Lang | undefined, working: false });
+  const live = useRef({ candidate: '', streak: 0, lastAdded: '', lang: undefined as Lang | undefined, working: false, asianAt: 0, asianLang: undefined as Lang | undefined });
+  const [zoomNow, setZoomNow] = useState<number | null>(null);
+  // Zoom and visible part are kept, so a Cardslinger setup only has to be set once.
+  const setView = (zoom: number, shift: number) => save({ ...settings, scanZoom: zoom, scanShift: Math.round(shift * 10) / 10 });
+  const stepZoom = (d: number) => {
+    const base = settings.scanZoom || zoomNow || 1;
+    setView(Math.min(5, Math.max(1, Math.round((base + d) * 4) / 4)), settings.scanShift);
+  };
 
   useEffect(() => {
     if (!LiveCamera) return;
@@ -86,8 +93,16 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
       .catch(() => setStatus('Kartenliste konnte nicht geladen werden – Internet prüfen'));
   }, []);
 
-  async function onFrame(text: string, image?: ImageHit[]) {
+  async function onFrame(text: string, image?: ImageHit[], asianPass?: boolean) {
     const L = live.current;
+    // Japanese writing only shows up in the Japanese passes (every 4th frame); remember it for a moment.
+    const asian = asianLang(text);
+    if (asian) {
+      L.asianAt = Date.now();
+      L.asianLang = asian;
+    } else if (asianPass && Date.now() - L.asianAt > 1500) L.asianAt = 0;
+    const isAsian = Date.now() - L.asianAt < 2500;
+    if (asianPass && !asian && !isAsian) return; // the Latin passes do the rest
     if (L.working) return;
     const locked = lockedRef.current;
     L.working = true;
@@ -98,7 +113,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
         if (m) hit = { id: m.card.id, confident: m.confident, match: m };
       } else if (idx.current) {
         const known = idx.current.ids;
-        hit = combineHits(matchLive(text, idx.current), image, (id) => known.has(id));
+        hit = combineHits(isAsian ? null : matchLive(text, idx.current), image, (id) => known.has(id), isAsian);
       }
       if (!hit) {
         L.candidate = '';
@@ -110,7 +125,7 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
       if (hit.id === L.lastAdded) return;
       L.streak = hit.id === L.candidate ? L.streak + 1 : 1;
       L.candidate = hit.id;
-      L.lang = detectLang(text) ?? (L.streak === 1 ? undefined : L.lang);
+      L.lang = isAsian ? L.asianLang : (detectLang(text) ?? (L.streak === 1 ? undefined : L.lang));
       // Two matching frames in a row; more when the name was not readable.
       if (L.streak < (hit.confident ? 2 : 6)) {
         setStatus('Erkenne …');
@@ -224,7 +239,14 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={styles.camWrap}>
         {LiveCamera ? (
-          <LiveCamera style={StyleSheet.absoluteFill} active={!paused} torch={torch} onText={(e) => onFrame(e.nativeEvent.text, e.nativeEvent.image)} />
+          <LiveCamera style={StyleSheet.absoluteFill} active={!paused} torch={torch}
+            zoom={settings.scanZoom}
+            shift={settings.scanShift}
+            onText={(e) => {
+              if (e.nativeEvent.zoom && e.nativeEvent.zoom !== zoomNow) setZoomNow(e.nativeEvent.zoom);
+              onFrame(e.nativeEvent.text, e.nativeEvent.image, e.nativeEvent.asianPass);
+            }}
+          />
         ) : (
           <CameraView ref={cam} style={StyleSheet.absoluteFill} facing="back" autofocus="on" onCameraReady={() => setReady(true)} />
         )}
@@ -253,6 +275,30 @@ export default function ScanScreen({ onOpenSettings }: { onOpenSettings: () => v
             </Pressable>
             <Pressable style={[styles.bigBtn, { flex: 1 }]} onPress={() => setTorch((t) => !t)}>
               <Text style={styles.bigBtnText}>{torch ? 'Licht aus' : 'Licht an'}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {LiveCamera ? (
+          <View style={styles.row}>
+            <Text style={styles.viewLabel}>Zoom</Text>
+            <Pressable style={styles.viewBtn} onPress={() => stepZoom(-0.25)}>
+              <Text style={styles.viewBtnText}>−</Text>
+            </Pressable>
+            <Pressable onPress={() => setView(0, settings.scanShift)}>
+              <Text style={styles.viewValue}>
+                {(settings.scanZoom || zoomNow || 1).toFixed(2).replace('.', ',')}×{settings.scanZoom ? '' : ' auto'}
+              </Text>
+            </Pressable>
+            <Pressable style={styles.viewBtn} onPress={() => stepZoom(0.25)}>
+              <Text style={styles.viewBtnText}>+</Text>
+            </Pressable>
+            <View style={{ flex: 1 }} />
+            <Text style={styles.viewLabel}>Ausschnitt</Text>
+            <Pressable style={styles.viewBtn} onPress={() => setView(settings.scanZoom, Math.max(-1, settings.scanShift - 0.25))}>
+              <Text style={styles.viewBtnText}>▲</Text>
+            </Pressable>
+            <Pressable style={styles.viewBtn} onPress={() => setView(settings.scanZoom, Math.min(1, settings.scanShift + 0.25))}>
+              <Text style={styles.viewBtnText}>▼</Text>
             </Pressable>
           </View>
         ) : (
@@ -430,6 +476,10 @@ const makeStyles = (colors: Palette) =>
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: colors.bg },
   p: { color: colors.text, marginBottom: 16, textAlign: 'center' },
+  viewLabel: { color: colors.muted, fontSize: 13, fontWeight: '600' },
+  viewValue: { color: colors.text, fontSize: 14, fontWeight: '700', minWidth: 62, textAlign: 'center' },
+  viewBtn: { width: 36, height: 32, borderRadius: 8, backgroundColor: colors.chip, alignItems: 'center', justifyContent: 'center' },
+  viewBtnText: { color: colors.text, fontSize: 16, fontWeight: '700' },
   camWrap: { height: 340, backgroundColor: '#000', overflow: 'hidden' },
   frame: {
     position: 'absolute',
